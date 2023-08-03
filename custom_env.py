@@ -6,6 +6,7 @@ from gym import spaces
 from gym.utils import seeding
 import math
 
+
 _OBSERVATIONS = "observations"
 _ACTIONS = "sampled_actions"
 _REWARDS = "rewards"
@@ -68,76 +69,36 @@ class CustomEnvironment(object):
     all agents try to meet at the same target_position of a 2D-plane
     """
 
-    def __init__(self,
-                 num_preys=50,
-                 num_predators=1,
-                 stage_size=100.0,
-                 episode_length=240,
-                 preparation_length=120,
-                 # Physics
-                 draging_force_coefficient=0,
-                 contact_force_coefficient=0,
-                 wall_contact_force_coefficient=0,
-                 prey_size=0.2,
-                 predator_size=0.2,
-                 min_speed=0.2,
-                 max_speed=0.5,
-                 max_acceleration=0.5,
-                 min_acceleration=-0.5,
-                 max_turn=np.pi / 4,
-                 min_turn=-np.pi / 4,
-                 num_acceleration_levels=5,
-                 num_turn_levels=5,
-                 starving_penalty_for_predator=-1.0,
-                 eating_reward_for_predator=1.0,
-                 surviving_reward_for_prey=1.0,
-                 death_penalty_for_prey=-1.0,
-                 edge_hit_penalty=-0.1,
-                 end_of_game_penalty=-10,
-                 end_of_game_reward=10,
-                 use_energy_cost=True,
-                 use_full_observation=True,
-                 max_seeing_angle=None,
-                 max_seeing_distance=None,
-                 num_other_agents_observed=None,
-                 use_time_in_observation=True,
-                 use_polar_coordinate=False,
-                 seed=None,
-                 ):
+    def __init__(self, config):
+
         self.float_dtype = np.float32
         self.int_dtype = np.int32
-        # small number to prevent indeterminate cases
         self.eps = self.float_dtype(1e-10)
 
-        # Seeding
         self.np_random = np.random
+        seed = config.get("seed", None)
         if seed is not None:
             self.np_random, seed = seeding.np_random(seed)
 
-        # ENVIRONMENT
-        # Length and preparation
-        assert episode_length > 0
-        self.episode_length = episode_length
-        self.preparation_length = preparation_length
+        self.episode_length = config.get("episode_length", 240)
+        assert self.episode_length > 0
+        self.preparation_length = config.get("preparation_length", 120)
 
-        # Square 2D grid
-        assert stage_size > 0
-        self.stage_size = self.float_dtype(stage_size)
+        self.stage_size = self.float_dtype(config.get("stage_size", 100.0))
+        assert self.stage_size > 0
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
-        # AGENTS
-        assert num_preys > 0
-        assert num_predators > 0
-        self.num_preys = num_preys
-        self.num_predators = num_predators
+        self.num_preys = config.get("num_preys", 50)
+        self.num_predators = config.get("num_predators", 1)
+        assert self.num_preys > 0
+        assert self.num_predators > 0
         self.num_agents = self.num_preys + self.num_predators
 
-        assert 0 <= prey_size <= 1
-        assert 0 <= predator_size <= 1
-        self.prey_size = prey_size
-        self.predator_size = predator_size
+        self.prey_size = config.get("prey_size", 0.2)
+        self.predator_size = config.get("predator_size", 0.2)
+        assert 0 <= self.prey_size <= 1
+        assert 0 <= self.predator_size <= 1
 
-        # Initialize agent objects
         self.agents = []
         for i in range(self.num_agents):
             if i < self.num_preys:
@@ -148,52 +109,36 @@ class CustomEnvironment(object):
                 size = self.predator_size
             self.agents.append(Agent(agent_type=agent_type, size=size))
 
-        # PHYSICS
-        # Eating distance
-        # Distance margin between agents for eating
-        # If a predator is closer than this to a prey,
-        # the predator eats the prey
-        self.eating_distance = prey_size + predator_size
+        self.eating_distance = self.prey_size + self.predator_size
 
-        # Set the max speed level
-        self.max_speed = self.float_dtype(max_speed)
-        self.min_speed = self.float_dtype(min_speed)
+        self.max_speed = self.float_dtype(config.get("max_speed", 0.5))
+        self.min_speed = self.float_dtype(config.get("min_speed", 0.2))
 
-        self.draging_force_coefficient = draging_force_coefficient
-        self.contact_force_coefficient = contact_force_coefficient
-        self.wall_contact_force_coefficient = wall_contact_force_coefficient
+        self.draging_force_coefficient = config.get("draging_force_coefficient", 0)
+        self.contact_force_coefficient = config.get("contact_force_coefficient", 0)
+        self.wall_contact_force_coefficient = config.get("wall_contact_force_coefficient", 0)
 
-        # ACTION SPACE
-        # The num_acceleration and num_turn levels refer to the number of
-        # uniformly-spaced levels between (min_acceleration and max_acceleration)
-        # and (min_turn and max_turn), respectively.
-        assert num_acceleration_levels >= 0
-        assert num_turn_levels >= 0
-        self.num_acceleration_levels = num_acceleration_levels
-        self.num_turn_levels = num_turn_levels
-        self.max_acceleration = self.float_dtype(max_acceleration)
-        self.min_acceleration = self.float_dtype(min_acceleration)
+        self.num_acceleration_levels = config.get("num_acceleration_levels", 5)
+        self.num_turn_levels = config.get("num_turn_levels", 5)
+        self.max_acceleration = self.float_dtype(config.get("max_acceleration", 0.5))
+        self.min_acceleration = self.float_dtype(config.get("min_acceleration", -0.5))
 
-        self.max_turn = self.float_dtype(max_turn)
-        self.min_turn = self.float_dtype(min_turn)
+        self.max_turn = self.float_dtype(config.get("max_turn", np.pi / 4))
+        self.min_turn = self.float_dtype(config.get("min_turn", -np.pi / 4))
 
-        # Acceleration actions
+        assert self.num_acceleration_levels >= 0
+        assert self.num_turn_levels >= 0
+
         self.acceleration_actions = np.linspace(
             self.min_acceleration, self.max_acceleration, self.num_acceleration_levels
         )
-        # Add action 0 - this will be the no-op, or 0 acceleration
-        self.acceleration_actions = np.insert(self.acceleration_actions, 0, 0).astype(
-            self.float_dtype
-        )
+        self.acceleration_actions = np.insert(self.acceleration_actions, 0, 0).astype(self.float_dtype)
 
-        # Turn actions
         self.turn_actions = np.linspace(
             self.min_turn, self.max_turn, self.num_turn_levels
         )
-        # Add action 0 - this will be the no-op, or 0 turn
         self.turn_actions = np.insert(self.turn_actions, 0, 0).astype(self.float_dtype)
 
-        # These will be set during reset (see below)
         self.timestep = None
 
         self.action_space = {
@@ -203,7 +148,11 @@ class CustomEnvironment(object):
             for agent_id in range(self.num_agents)
         }
 
-        # OBSERVATION SPACE
+        use_full_observation = config.get("use_full_observation", True)
+        num_other_agents_observed = config.get("num_other_agents_observed", None)
+        max_seeing_angle = config.get("max_seeing_angle", None)
+        max_seeing_distance = config.get("max_seeing_distance", None)
+
         if sum(var for var in [use_full_observation, num_other_agents_observed is not None,
                                (max_seeing_angle is not None and max_seeing_distance is not None)]) != 1:
             raise ValueError("Only one of use_full_observation, num_other_agents_observed, and max_seeing_angle should be set.")
@@ -211,33 +160,29 @@ class CustomEnvironment(object):
         self.observation_space = None  # Note: this will be set via the env_wrapper
         self.use_full_observation = use_full_observation
         self.num_other_agents_observed = self.num_agents if num_other_agents_observed is None else num_other_agents_observed
-        self.max_seeing_angle = stage_size / np.sqrt(2) if max_seeing_angle is None else max_seeing_angle
+        self.max_seeing_angle = self.stage_size / np.sqrt(2) if max_seeing_angle is None else max_seeing_angle
         self.max_seeing_distance = np.pi if max_seeing_distance is None else max_seeing_distance
 
-        self.use_time_in_observation = use_time_in_observation
-        self.use_polar_coordinate = use_polar_coordinate
+        self.use_time_in_observation = config.get("use_time_in_observation", True)
+        self.use_polar_coordinate = config.get("use_polar_coordinate", False)
 
-        # Used in generate_observation()
-        self.init_obs = None  # Will be set later in generate_observation()
+        self.init_obs = None
 
-        # REWARDS
-        self.starving_penalty_for_predator = starving_penalty_for_predator
-        self.eating_reward_for_predator = eating_reward_for_predator
-        self.surviving_reward_for_prey = surviving_reward_for_prey
-        self.death_penalty_for_prey = death_penalty_for_prey
-        self.edge_hit_penalty = edge_hit_penalty
-        self.end_of_game_penalty = end_of_game_penalty
-        self.end_of_game_reward = end_of_game_reward
-        self.use_energy_cost = use_energy_cost
-
-    name = "CustomEnv"
+        self.starving_penalty_for_predator = config.get("starving_penalty_for_predator", -1.0)
+        self.eating_reward_for_predator = config.get("eating_reward_for_predator", 1.0)
+        self.surviving_reward_for_prey = config.get("surviving_reward_for_prey", 1.0)
+        self.death_penalty_for_prey = config.get("death_penalty_for_prey", -1.0)
+        self.edge_hit_penalty = config.get("edge_hit_penalty", -0.1)
+        self.end_of_game_penalty = config.get("end_of_game_penalty", -10)
+        self.end_of_game_reward = config.get("end_of_game_reward", 10)
+        self.use_energy_cost = config.get("use_energy_cost", True)
 
     def _generate_observation(self, agent):
         """
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(5*self.num_agents, dtype=self.float_dtype)
+        obs = np.zeros(5*self.num_agents + 4, dtype=self.float_dtype)
 
         # Generate observation for each agent
         obs[0] = agent.speed_x / self.max_speed
@@ -272,7 +217,7 @@ class CustomEnvironment(object):
         """
         concat all agent's observation to construct state info
         """
-        return np.concatenate(self._generate_observation(), axis=0)  # state shape is (-1, )
+        return np.concatenate(self._get_observation_list(), axis=0)  # state shape is (-1, )
 
     def reset(self):
         """
@@ -284,7 +229,8 @@ class CustomEnvironment(object):
         for i, agent in enumerate(self.agents):
             agent.loc_x = self.stage_size * self.np_random.rand()
             agent.loc_y = self.stage_size * self.np_random.rand()
-            agent.speed = 0.0
+            agent.speed_x = 0.0
+            agent.speed_y = 0.0
             agent.orientation = self.np_random.rand() * 2 * np.pi
             agent.acceleration_amplitude = 0.0
             agent.acceleration_orientation = 0.0
@@ -292,18 +238,19 @@ class CustomEnvironment(object):
 
         observation_list = self._get_observation_list()
         state = self._get_state()
-        return observation_list, state
+        return observation_list
 
     def step(self, action_list):
+        self.timestep += 1
         for _ in range(self.action_effective_step):
             self._simulate_one_step(action_list)
 
         observation_list = self._get_observation_list()
         state = self._get_state()
-        reward_list, team_reward = self._get_reward()
+        reward_list = self._get_reward()
         done = self._get_done()
         info = self._get_info()
-        return (observation_list, state), (reward_list, team_reward), done, info
+        return (observation_list, state), reward_list, done, info
 
     def render(self):
         # TODO
@@ -449,22 +396,69 @@ class CustomEnvironment(object):
             # Add the energy efficiency penalty
             reward_list[i] += self.energy_cost_penalty[i] / 2
 
-        if self.env_timestep == self.episode_length:
-            self.done = 1
-
         # reward_list[-1] is the global reward (i.e., sum of individual rewards)
-        return (reward_list, sum(reward_list))
+        return reward_list
 
     def _get_done(self):
-        if self.timestep >= self.max_step_count:
+        if self.timestep >= self.episode_length:
             return True
         return False
 
     def _get_info(self):
         info = {
             'step_count': self.timestep,
-            'max_step_count': self.max_step_count
+            'episode_length': self.episode_length
         }
         return info
 
 
+if __name__ == "__main__":
+
+    # Assuming your CustomEnvironment has been updated according to the previous message
+    # import CustomEnvironment from your custom_env file
+    from config import run_config
+    from ray.rllib.algorithms.ppo import PPOConfig
+
+
+    # Create an RLlib Algorithm instance from a PPOConfig to learn how to
+    # act in the above environment.
+    config = (
+        PPOConfig().environment(
+            # Env class to use (here: our gym.Env sub-class from above).
+            env=CustomEnvironment,
+            # Config dict to be passed to our custom env's constructor.
+            env_config=run_config["env"],  # unpack the dictionary here
+    )
+    # Parallelize environment rollouts.
+    .rollouts(num_rollout_workers=1)
+    )
+    algo = config.build()
+
+    # Train for n iterations and report results (mean episode rewards).
+    # Since we have to guess 10 times and the optimal reward is 0.0
+    # (exact match between observation and action value),
+    # we can expect to reach an optimal episode reward of 0.0.
+    for i in range(5):
+        results = algo.train()
+        print(f"Iter: {i}; avg. reward={results['episode_reward_mean']}")
+
+    # Perform inference (action computations) based on given env observations.
+    # Note that we are using a slightly simpler env here (-3.0 to 3.0, instead
+    # of -5.0 to 5.0!), however, this should still work as the agent has
+    # (hopefully) learned to "just always repeat the observation!".
+    env = CustomEnvironment(**run_config["env"])
+    # Get the initial observation (some value between -10.0 and 10.0).
+    obs, info = env.reset()
+    done = False
+    total_reward = 0.0
+    # Play one episode.
+    while not done:
+        # Compute a single action, given the current observation
+        # from the environment.
+        action = algo.compute_single_action(obs)
+        # Apply the computed action in the environment.
+        obs, reward, done, info = env.step(action)
+        # Sum up rewards for reporting purposes.
+        total_reward += reward
+    # Report results.
+    print(f"Played 1 episode; total-reward={total_reward}")
