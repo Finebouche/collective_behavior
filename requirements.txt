@@ -1,4 +1,4 @@
-gym
+gymnasium
 ray[rllib]
 tensorflow
 torch

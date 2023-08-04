@@ -1,9 +1,6 @@
 import numpy as np
 
 run_config = dict(
-    # Sample YAML configuration for the tag continuous environment
-    name="collective_emergence",
-
     # Environment settings
     env=dict(
         num_preys=50,
@@ -44,15 +41,8 @@ run_config = dict(
         use_polar_coordinate=True,
         seed=None,
     ),
-
-    # Trainer settings
-    trainer=dict(
-        num_envs=400,  # number of environment replicas
-        train_batch_size=1000,  # total batch size used for training per iteration (across all the environments)
-        num_episodes=10000,  # number of episodes to run the training for (can be arbitrarily high)
-    ),
     # Policy network settings
-    policy=dict(  # list all the policies below
+    policies=dict(  # list all the policies below
         prey=dict(
             to_train=True,  # flag indicating whether the model needs to be trained
             algorithm="PPO",  # algorithm used to train the policy
@@ -80,13 +70,4 @@ run_config = dict(
             )
         )
     ),
-
-    # Checkpoint saving setting
-    saving=dict(
-        metrics_log_freq=100,  # how often (in iterations) to print the metrics
-        model_params_save_freq=50000,  # how often (in iterations) to save the model parameters
-        basedir="/tmp",  # base folder used for saving
-        name="collective_v0",
-        tag="50preys_1predator",
-    )
 )
