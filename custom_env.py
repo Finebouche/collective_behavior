@@ -1,7 +1,6 @@
 import numpy as np
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
-from gymnasium.spaces import Box
-from gymnasium.spaces import MultiDiscrete
+from gymnasium import spaces
 from gymnasium.utils import seeding
 import math
 
@@ -50,7 +49,7 @@ class ParticuleAgent:
 
 
 class CustomEnvironment(MultiAgentEnv):
-    def __init__(self, config):
+    def __init__(self, config, wtf):
 
         super().__init__()
         self.float_dtype = np.float32
@@ -58,26 +57,26 @@ class CustomEnvironment(MultiAgentEnv):
         self.eps = self.float_dtype(1e-10)
 
         self.np_random = np.random
-        seed = config.get("seed", None)
+        seed = config.get('seed')
         if seed is not None:
             self.np_random, seed = seeding.np_random(seed)
 
-        self.episode_length = config.get("episode_length", 240)
+        self.episode_length = config.get('episode_length')
         assert self.episode_length > 0
-        self.preparation_length = config.get("preparation_length", 120)
+        self.preparation_length = config.get('preparation_length')
 
-        self.stage_size = self.float_dtype(config.get("stage_size", 100.0))
+        self.stage_size = config.get('stage_size')
         assert self.stage_size > 0
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
-        self.num_preys = config.get("num_preys", 50)
-        self.num_predators = config.get("num_predators", 1)
+        self.num_preys = config.get('num_preys')
+        self.num_predators = config.get('num_predators')
         assert self.num_preys > 0
         assert self.num_predators > 0
         self.num_agents = self.num_preys + self.num_predators
 
-        self.prey_size = config.get("prey_size", 0.2)
-        self.predator_size = config.get("predator_size", 0.2)
+        self.prey_size = config.get('prey_size')
+        self.predator_size = config.get('predator_size')
         assert 0 <= self.prey_size <= 1
         assert 0 <= self.predator_size <= 1
 
@@ -94,20 +93,20 @@ class CustomEnvironment(MultiAgentEnv):
 
         self.eating_distance = self.prey_size + self.predator_size
 
-        self.max_speed = self.float_dtype(config.get("max_speed", 0.5))
-        self.min_speed = self.float_dtype(config.get("min_speed", 0.2))
+        self.max_speed = config.get('max_speed')
+        self.min_speed = config.get('min_speed')
 
-        self.dragging_force_coefficient = config.get("dragging_force_coefficient", 0)
-        self.contact_force_coefficient = config.get("contact_force_coefficient", 0)
-        self.wall_contact_force_coefficient = config.get("wall_contact_force_coefficient", 0)
+        self.dragging_force_coefficient = config.get('dragging_force_coefficient')
+        self.contact_force_coefficient = config.get('contact_force_coefficient')
+        self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
 
-        self.num_acceleration_levels = config.get("num_acceleration_levels", 5)
-        self.num_turn_levels = config.get("num_turn_levels", 5)
-        self.max_acceleration = self.float_dtype(config.get("max_acceleration", 0.5))
-        self.min_acceleration = self.float_dtype(config.get("min_acceleration", -0.5))
+        self.num_acceleration_levels = config.get('num_acceleration_levels')
+        self.num_turn_levels = config.get('num_turn_levels')
+        self.max_acceleration = config.get('max_acceleration')
+        self.min_acceleration = config.get('min_acceleration')
 
-        self.max_turn = self.float_dtype(config.get("max_turn", np.pi / 4))
-        self.min_turn = self.float_dtype(config.get("min_turn", -np.pi / 4))
+        self.max_turn = config.get('max_turn')
+        self.min_turn = config.get('min_turn')
 
         assert self.num_acceleration_levels >= 0
         assert self.num_turn_levels >= 0
@@ -125,14 +124,14 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = None
 
         self.action_space = {
-            agent.agent_id: MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions))) for agent in self.agents
+            agent.agent_id: spaces.MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions))) for agent in self.agents
         }
         # self.action_space = MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions)))
 
-        use_full_observation = config.get("use_full_observation", True)
-        num_other_agents_observed = config.get("num_other_agents_observed", None)
-        max_seeing_angle = config.get("max_seeing_angle", None)
-        max_seeing_distance = config.get("max_seeing_distance", None)
+        use_full_observation = config.get('use_full_observation')
+        num_other_agents_observed = config.get('num_other_agents_observed')
+        max_seeing_angle = config.get('max_seeing_angle')
+        max_seeing_distance = config.get('max_seeing_distance')
 
         if sum(var for var in [use_full_observation, num_other_agents_observed is not None,
                                (max_seeing_angle is not None and max_seeing_distance is not None)]) != 1:
@@ -141,7 +140,9 @@ class CustomEnvironment(MultiAgentEnv):
         low = np.full((5 * self.num_agents + 4,), -1)
         high = np.full((5 * self.num_agents + 4,), 1)
 
-        self.observation_space = {agent.agent_id: Box(low=low, high=high, dtype=self.float_dtype) for agent in self.agents}
+        self.observation_space = {
+            agent.agent_id: spaces.Box(low=low, high=high, dtype=self.float_dtype) for agent in self.agents
+        }
         # self.observation_space = Box(low=low, high=high, dtype=self.float_dtype)
 
         self.use_full_observation = use_full_observation
@@ -149,19 +150,19 @@ class CustomEnvironment(MultiAgentEnv):
         self.max_seeing_angle = self.stage_size / np.sqrt(2) if max_seeing_angle is None else max_seeing_angle
         self.max_seeing_distance = np.pi if max_seeing_distance is None else max_seeing_distance
 
-        self.use_time_in_observation = config.get("use_time_in_observation", True)
-        self.use_polar_coordinate = config.get("use_polar_coordinate", False)
+        self.use_time_in_observation = config.get('use_time_in_observation')
+        self.use_polar_coordinate = config.get('use_polar_coordinate')
 
         self.init_obs = None
 
-        self.starving_penalty_for_predator = config.get("starving_penalty_for_predator", -1.0)
-        self.eating_reward_for_predator = config.get("eating_reward_for_predator", 1.0)
-        self.surviving_reward_for_prey = config.get("surviving_reward_for_prey", 1.0)
-        self.death_penalty_for_prey = config.get("death_penalty_for_prey", -1.0)
-        self.edge_hit_penalty = config.get("edge_hit_penalty", -0.1)
-        self.end_of_game_penalty = config.get("end_of_game_penalty", -10)
-        self.end_of_game_reward = config.get("end_of_game_reward", 10)
-        self.use_energy_cost = config.get("use_energy_cost", True)
+        self.starving_penalty_for_predator = config.get('starving_penalty_for_predator')
+        self.eating_reward_for_predator = config.get('eating_reward_for_predator')
+        self.surviving_reward_for_prey = config.get('surviving_reward_for_prey')
+        self.death_penalty_for_prey = config.get('death_penalty_for_prey')
+        self.edge_hit_penalty = config.get('edge_hit_penalty')
+        self.end_of_game_penalty = config.get('end_of_game_penalty')
+        self.end_of_game_reward = config.get('end_of_game_reward')
+        self.use_energy_cost = config.get('use_energy_cost')
 
     def _generate_observation(self, agent):
         """
@@ -197,9 +198,9 @@ class CustomEnvironment(MultiAgentEnv):
         return obs
 
     def _get_observation_list(self):
-        return [self._generate_observation(agent) for agent in self.agents]
+        return {agent.agent_id: self._generate_observation(agent) for agent in self.agents}
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         """
         Env reset(). when done is called
         """
@@ -217,18 +218,14 @@ class CustomEnvironment(MultiAgentEnv):
             agent.still_in_game = True
 
         observation_list = self._get_observation_list()
-        observation_list = {agent.agent_id: obs for agent, obs in zip(self.agents, observation_list)}
-        info = self._get_info()
-        return observation_list
+        infos = self._get_info()
+        return observation_list, infos
 
     def step(self, action_list):
-        print("This is a step")
-        print(action_list)
         self.timestep += 1
         energy_cost_penalty = self._simulate_one_step(action_list)
 
         observation_list = self._get_observation_list()
-        observation_list = {agent.agent_id: obs for agent, obs in zip(self.agents, observation_list)}
 
         reward_list = self._get_reward(energy_cost_penalty)
         terminateds = self._get_done()
@@ -240,8 +237,6 @@ class CustomEnvironment(MultiAgentEnv):
         raise NotImplementedError()
 
     def _simulate_one_step(self, action_list):
-        print(action_list)
-
         for agent in self.agents:
             # get the actions for this agent
             self_force_amplitude = action_list[agent.agent_id][0]
@@ -393,9 +388,12 @@ if __name__ == "__main__":
     from config import run_config
     from ray.rllib.algorithms.ppo import PPOConfig
     from ray import tune
+    from functools import partial
 
-    tune.register_env('myEnv', lambda run_config: CustomEnvironment(run_config["env"]))
-    env = CustomEnvironment(run_config["env"])
+
+    env_creator = partial(CustomEnvironment, run_config["env"])
+    tune.register_env('custom_env', env_creator)
+    env = CustomEnvironment(run_config["env"], "caca")
 
     tune.run(
         "PPO",
@@ -404,7 +402,8 @@ if __name__ == "__main__":
             "episode_reward_mean": 7.99,
         },
         config={
-            "env": "myEnv",
+            "env": "custom_env",
+            "env_config": run_config["env"],
             "batch_mode": "complete_episodes",
             "num_workers": 0,
             "multiagent": {
