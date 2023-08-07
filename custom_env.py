@@ -371,7 +371,6 @@ class CustomEnvironment(MultiAgentEnv):
             # Add the energy efficiency penalty
             reward_list[i] += energy_cost_penalty[i] / 2
 
-        # reward_list[-1] is the global reward (i.e., sum of individual rewards)
         return reward_list
 
     def _get_done(self):
@@ -390,12 +389,27 @@ if __name__ == "__main__":
     from ray.rllib.algorithms.ppo import PPOConfig
     from ray import tune
     from functools import partial
+    from ray.tune.schedulers import PopulationBasedTraining
 
-
-    env_creator = partial(CustomEnvironment, run_config["env"])
-    tune.register_env('custom_env', env_creator)
     env = CustomEnvironment(run_config["env"])
 
+    pbt_scheduler = PopulationBasedTraining(
+        time_attr='training_iteration',
+        metric="episode_reward_mean",
+        mode="max",
+        perturbation_interval=5,
+        quantile_fraction=0.25,
+        # Specifies the search space for these hyperparams
+        hyperparam_mutations={
+            "lambda": lambda: random.uniform(0.9, 1.0),
+            "clip_param": lambda: random.uniform(0.1, 0.5),
+            "lr": lambda: random.uniform(1e-3, 1e-5),
+            "train_batch_size": lambda: random.randint(1000, 60000),
+        },
+        custom_explore_fn=explore,
+    )
+
+    
     tune.run(
         "PPO",
         stop={
@@ -403,7 +417,7 @@ if __name__ == "__main__":
             "episode_reward_mean": 7.99,
         },
         config={
-            "env": "custom_env",
+            "env": CustomEnvironment,
             "env_config": run_config["env"],
             "batch_mode": "complete_episodes",
             "num_workers": 0,
@@ -414,6 +428,7 @@ if __name__ == "__main__":
                     "predator": (None, env.observation_space,
                                  env.action_space, {}),
                 },
-                "policy_mapping_fn": lambda x: "predator" if x == 0 else "prey",
+                "policy_mapping_fn": lambda x: "prey" if x <=env.num_prey else "predator",
             },
-        })
+        },
+        scheduler=pbt_scheduler)
