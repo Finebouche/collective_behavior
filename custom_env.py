@@ -1,10 +1,10 @@
 import numpy as np
+import math
+
 from ray.rllib.env import MultiAgentEnv
 from gymnasium import spaces
 from gymnasium.utils import seeding
 from ray.rllib.env.env_context import EnvContext
-import math
-
 
 def sign(x):
     if x == 0:
@@ -386,13 +386,22 @@ class CustomEnvironment(MultiAgentEnv):
 
 if __name__ == "__main__":
     from config import run_config
-    from ray.rllib.algorithms.ppo import PPOConfig
     from ray import tune
-    from functools import partial
+
+    # From https://docs.ray.io/en/latest/tune/examples/includes/pb2_ppo_example.html
+    # and https://github.com/ray-project/ray/issues/35923
     from ray.tune.schedulers import PopulationBasedTraining
-
-    env = CustomEnvironment(run_config["env"])
-
+    import random
+        def explore(config):
+        # Ensure we collect enough timesteps to do sgd.
+        if config["train_batch_size"] < config["sgd_minibatch_size"] * 2:
+            config["train_batch_size"] = config["sgd_minibatch_size"] * 2
+        # Ensure we run at least one sgd iter.
+        if config["lambda"] > 1:
+            config["lambda"] = 1
+        config["train_batch_size"] = int(config["train_batch_size"])
+        return config
+        
     pbt_scheduler = PopulationBasedTraining(
         time_attr='training_iteration',
         metric="episode_reward_mean",
@@ -407,7 +416,12 @@ if __name__ == "__main__":
             "train_batch_size": lambda: random.randint(1000, 60000),
         },
         custom_explore_fn=explore,
-    )
+    
+    ## and workarround (that doesn't work)
+
+
+        
+    env = CustomEnvironment(run_config["env"])
 
     
     tune.run(
