@@ -1,7 +1,8 @@
 import numpy as np
-from ray.rllib.env.multi_agent_env import MultiAgentEnv
+from ray.rllib.env import MultiAgentEnv
 from gymnasium import spaces
 from gymnasium.utils import seeding
+from ray.rllib.env.env_context import EnvContext
 import math
 
 
@@ -49,7 +50,7 @@ class ParticuleAgent:
 
 
 class CustomEnvironment(MultiAgentEnv):
-    def __init__(self, config, wtf):
+    def __init__(self, config: EnvContext):
 
         super().__init__()
         self.float_dtype = np.float32
@@ -83,10 +84,10 @@ class CustomEnvironment(MultiAgentEnv):
         self.agents = []
         for i in range(self.num_agents):
             if i < self.num_preys:
-                agent_type = 'prey'
+                agent_type = 0 # for preys
                 size = self.prey_size
             else:
-                agent_type = 'predator'
+                agent_type = 1 # for predators
                 size = self.predator_size
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, size=size))
         self._agent_ids = {agent.agent_id for agent in self.agents}
@@ -123,10 +124,9 @@ class CustomEnvironment(MultiAgentEnv):
 
         self.timestep = None
 
-        self.action_space = {
+        self.action_space = spaces.Dict({
             agent.agent_id: spaces.MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions))) for agent in self.agents
-        }
-        # self.action_space = MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions)))
+        })
 
         use_full_observation = config.get('use_full_observation')
         num_other_agents_observed = config.get('num_other_agents_observed')
@@ -137,13 +137,12 @@ class CustomEnvironment(MultiAgentEnv):
                                (max_seeing_angle is not None and max_seeing_distance is not None)]) != 1:
             raise ValueError("Only one of use_full_observation, num_other_agents_observed, and max_seeing_angle should be set.")
 
-        low = np.full((5 * self.num_agents + 4,), -1)
-        high = np.full((5 * self.num_agents + 4,), 1)
+        low = np.full((6 * self.num_agents + 4,), -1)
+        high = np.full((6 * self.num_agents + 4,), 1)
 
-        self.observation_space = {
+        self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(low=low, high=high, dtype=self.float_dtype) for agent in self.agents
-        }
-        # self.observation_space = Box(low=low, high=high, dtype=self.float_dtype)
+        })
 
         self.use_full_observation = use_full_observation
         self.num_other_agents_observed = self.num_agents if num_other_agents_observed is None else num_other_agents_observed
@@ -169,31 +168,33 @@ class CustomEnvironment(MultiAgentEnv):
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(5 * self.num_agents + 4, dtype=self.float_dtype)
+        obs = np.zeros(6 * self.num_agents + 4, dtype=self.float_dtype)
 
         # Generate observation for each agent
         obs[0] = agent.speed_x / self.max_speed
         obs[1] = agent.speed_y / self.max_speed
         obs[2] = agent.acceleration_amplitude / self.max_acceleration
-        obs[3] = agent.acceleration_orientation / np.pi
+        obs[3] = agent.acceleration_orientation / (2*np.pi)
 
         obs[4] = agent.loc_x / self.stage_size
         obs[5] = agent.loc_y / self.stage_size
-        obs[6] = agent.orientation / np.pi
+        obs[6] = agent.orientation / (2*np.pi)
         obs[7] = agent.size
         obs[8] = agent.still_in_game
+        obs[9] = agent.agent_type
 
         # Add the agent position and speed to the observation
-        j = 9  # start adding at this index after adding the initial properties
+        j = 10  # start adding at this index after adding the initial properties
         for other in self.agents:
             if other is agent:
                 continue
             obs[j] = (other.loc_x - agent.loc_x) / self.stage_size
             obs[j + 1] = (other.loc_y - agent.loc_y) / self.stage_size
-            obs[j + 2] = (other.orientation - agent.orientation) / np.pi
+            obs[j + 2] = (other.orientation - agent.orientation) / (2*np.pi)
             obs[j + 3] = other.size
             obs[j + 4] = other.still_in_game
-            j += 5  # move to the next 5 indices for the next agent
+            obs[j + 5] = other.agent_type
+            j += 6  # move to the next 6 indices for the next agent
 
         return obs
 
@@ -208,18 +209,17 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = 0
 
         for agent in self.agents:
-            agent.loc_x = self.stage_size * self.np_random.rand()
-            agent.loc_y = self.stage_size * self.np_random.rand()
+            agent.loc_x = self.np_random.random()
+            agent.loc_y = self.np_random.random()
             agent.speed_x = 0.0
             agent.speed_y = 0.0
-            agent.orientation = self.np_random.rand() * 2 * np.pi
+            agent.orientation = self.np_random.random()
             agent.acceleration_amplitude = 0.0
             agent.acceleration_orientation = 0.0
-            agent.still_in_game = True
+            agent.still_in_game = 1 # True = 1 and False = 0
 
         observation_list = self._get_observation_list()
-        infos = self._get_info()
-        return observation_list, infos
+        return observation_list, {}
 
     def step(self, action_list):
         self.timestep += 1
@@ -228,28 +228,33 @@ class CustomEnvironment(MultiAgentEnv):
         observation_list = self._get_observation_list()
 
         reward_list = self._get_reward(energy_cost_penalty)
-        terminateds = self._get_done()
-        info = self._get_info()
-        return observation_list, reward_list, terminateds, info
+        dones, truncateds = self._get_done()
+        return (observation_list, 
+                reward_list,             
+                dones,
+                truncateds, 
+                {},
+        )
 
     def render(self):
         # TODO
         raise NotImplementedError()
 
     def _simulate_one_step(self, action_list):
+        energy_cost_penalty = []
         for agent in self.agents:
             # get the actions for this agent
-            self_force_amplitude = action_list[agent.agent_id][0]
-            self_force_orientation = agent.orientation + action_list[agent.agent_id][1]
+            self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+            self_force_orientation = agent.orientation + self_force_orientation
             acceleration_x = self_force_amplitude * math.cos(self_force_orientation)
             acceleration_y = self_force_amplitude * math.sin(self_force_orientation)
 
             # set the energy cost penalty
             if self.use_energy_cost:
-                energy_cost_penalty = -(self_force_amplitude / self.max_acceleration + abs(self_force_orientation) / self.max_turn) / 100
+                energy_cost_penalty.append( -(self_force_amplitude / self.max_acceleration + abs(self_force_orientation) / self.max_turn) / 100)
 
             # DRAGGING FORCE
-            dragging_force_amplitude = agent.speed * self.dragging_force_coefficient
+            dragging_force_amplitude = math.sqrt(agent.speed_x**2 + agent.speed_y**2) * self.dragging_force_coefficient
             dragging_force_orientation = agent.orientation - math.pi  # opposed to the current speed
             acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
             acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
@@ -285,35 +290,37 @@ class CustomEnvironment(MultiAgentEnv):
             # UPDATE ACCELERATION/SPEED
             # Compute the amplitude and turn in polar coordinate
             agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
+            if agent.acceleration_amplitude > self.max_acceleration: 
+                acceleration_x = acceleration_x * self.max_acceleration/agent.acceleration_amplitude
+                acceleration_y = acceleration_y * self.max_acceleration/agent.acceleration_amplitude
+                agent.acceleration_amplitude = self.max_acceleration
             agent.acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
 
             # Compute the speed using projection
-            speed_x = agent.speed * math.cos(agent.orientation) + acceleration_x
-            speed_y = agent.speed * math.sin(agent.orientation) + acceleration_y
+            speed_x = agent.speed_x + acceleration_x
+            speed_y = agent.speed_y + acceleration_y
 
             # Update the agent's acceleration and directions
-            agent.acceleration = agent.acceleration_amplitude * agent.still_in_game
             agent.orientation = math.atan2(speed_y, speed_x) * agent.still_in_game
             agent.speed = math.sqrt(speed_x ** 2 + speed_y ** 2) * agent.still_in_game
 
             # speed clipping
             if agent.speed > self.max_speed:
-                agent.speed = self.max_speed * agent.still_in_game
+                agent.speed_x = agent.speed_x * self.max_speed/agent.speed
+                agent.speed_y = agent.speed_y * self.max_speed/agent.speed
 
             # UPDATE POSITION
             # Update the agent's location
-            agent.loc_x += agent.speed * math.cos(agent.orientation)
-            agent.loc_y += agent.speed * math.sin(agent.orientation)
+            agent.loc_x += agent.speed_x
+            agent.loc_y += agent.speed_y
 
-            return energy_cost_penalty
+        return energy_cost_penalty
 
     def _get_reward(self, energy_cost_penalty):
-        reward_list = [0] * self.num_agents
+        # Initialize rewards
+        reward_list = {agent.agent_id: 0 for agent in self.agents}
 
         for i, agent in enumerate(self.agents):
-            # Initialize rewards
-            reward_list[i] = 0
-
             if agent.still_in_game:
                 is_prey = not agent.agent_type  # 0 for prey, 1 for predator
 
@@ -334,7 +341,7 @@ class CustomEnvironment(MultiAgentEnv):
                         reward_list[nearest_predator_id] += self.eating_reward_for_predator
                         reward_list[i] += self.death_penalty_for_prey
                         self.num_preys -= 1
-                        agent.still_in_game[i] = 0
+                        agent.still_in_game = 0
                 else:  # is_predator
                     reward_list[i] += self.starving_penalty_for_predator
 
@@ -371,17 +378,11 @@ class CustomEnvironment(MultiAgentEnv):
         # Assuming that all agents terminate at the same time.
         done_for_all = self.timestep >= self.episode_length
 
-        done_dict = {agent_id: done_for_all for agent_id in self._agent_ids}
-        done_dict['__all__'] = done_for_all
+        dones = {agent_id: done_for_all for agent_id in self._agent_ids}
+        dones['__all__'] = done_for_all
+        truncateds = dones
 
-        return done_dict
-
-    def _get_info(self):
-        info = {
-            'step_count': self.timestep,
-            'episode_length': self.episode_length
-        }
-        return {agent_id: info for agent_id in self._agent_ids}
+        return dones, truncateds
 
 
 if __name__ == "__main__":
@@ -393,7 +394,7 @@ if __name__ == "__main__":
 
     env_creator = partial(CustomEnvironment, run_config["env"])
     tune.register_env('custom_env', env_creator)
-    env = CustomEnvironment(run_config["env"], "caca")
+    env = CustomEnvironment(run_config["env"])
 
     tune.run(
         "PPO",

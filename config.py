@@ -3,8 +3,8 @@ import numpy as np
 run_config = dict(
     # Environment settings
     env=dict(
-        num_preys=50,
-        num_predators=3,
+        num_preys=2,
+        num_predators=1,
         stage_size=30,
         episode_length=500,
         preparation_length=120,
