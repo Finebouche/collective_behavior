@@ -2,3 +2,6 @@ gymnasium
 ray[rllib]
 tensorflow
 torch
+
+fsspec
+supersuit

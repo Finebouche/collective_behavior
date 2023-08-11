@@ -101,33 +101,24 @@ class CustomEnvironment(MultiAgentEnv):
         self.contact_force_coefficient = config.get('contact_force_coefficient')
         self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
 
-        self.num_acceleration_levels = config.get('num_acceleration_levels')
-        self.num_turn_levels = config.get('num_turn_levels')
         self.max_acceleration = config.get('max_acceleration')
         self.min_acceleration = config.get('min_acceleration')
 
         self.max_turn = config.get('max_turn')
         self.min_turn = config.get('min_turn')
 
-        assert self.num_acceleration_levels >= 0
-        assert self.num_turn_levels >= 0
-
-        self.acceleration_actions = np.linspace(
-            self.min_acceleration, self.max_acceleration, self.num_acceleration_levels
-        )
-        self.acceleration_actions = np.insert(self.acceleration_actions, 0, 0).astype(self.float_dtype)
-
-        self.turn_actions = np.linspace(
-            self.min_turn, self.max_turn, self.num_turn_levels
-        )
-        self.turn_actions = np.insert(self.turn_actions, 0, 0).astype(self.float_dtype)
-
         self.timestep = None
 
         self.action_space = spaces.Dict({
-            agent.agent_id: spaces.MultiDiscrete((len(self.acceleration_actions), len(self.turn_actions))) for agent in self.agents
+            agent.agent_id: spaces.Box(low=np.array([self.min_acceleration, self.min_turn]), high=np.array([self.max_acceleration, self.max_turn]), shape=(2,), dtype=self.float_dtype) for agent in self.agents
         })
-
+        #self.action_space = spaces.Box(
+        #    low=np.array([self.min_acceleration, self.min_turn]), 
+        #    high=np.array([self.max_acceleration, self.max_turn]),
+        #    shape=(2,),
+        #    dtype=self.float_dtype
+        #)
+        
         use_full_observation = config.get('use_full_observation')
         num_other_agents_observed = config.get('num_other_agents_observed')
         max_seeing_angle = config.get('max_seeing_angle')
@@ -137,12 +128,10 @@ class CustomEnvironment(MultiAgentEnv):
                                (max_seeing_angle is not None and max_seeing_distance is not None)]) != 1:
             raise ValueError("Only one of use_full_observation, num_other_agents_observed, and max_seeing_angle should be set.")
 
-        low = np.full((6 * self.num_agents + 4,), -1)
-        high = np.full((6 * self.num_agents + 4,), 1)
-
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=low, high=high, dtype=self.float_dtype) for agent in self.agents
+            agent.agent_id: spaces.Box(low=-1, high=1, shape=(6 * self.num_agents + 4,), dtype=self.float_dtype) for agent in self.agents
         })
+        #self.observation_space = spaces.Box(low=-1, high=1, shape=(6 * self.num_agents + 4,), dtype=self.float_dtype)
 
         self.use_full_observation = use_full_observation
         self.num_other_agents_observed = self.num_agents if num_other_agents_observed is None else num_other_agents_observed
@@ -223,35 +212,27 @@ class CustomEnvironment(MultiAgentEnv):
 
     def step(self, action_list):
         self.timestep += 1
-        energy_cost_penalty = self._simulate_one_step(action_list)
+        self._simulate_one_step(action_list)
 
         observation_list = self._get_observation_list()
 
-        reward_list = self._get_reward(energy_cost_penalty)
+        reward_list = self._get_reward(action_list)
         dones, truncateds = self._get_done()
-        return (observation_list, 
-                reward_list,             
-                dones,
-                truncateds, 
-                {},
-        )
 
+        return observation_list, reward_list, dones, truncateds, {}
+        
     def render(self):
         # TODO
         raise NotImplementedError()
 
     def _simulate_one_step(self, action_list):
-        energy_cost_penalty = []
         for agent in self.agents:
             # get the actions for this agent
             self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+            
             self_force_orientation = agent.orientation + self_force_orientation
             acceleration_x = self_force_amplitude * math.cos(self_force_orientation)
             acceleration_y = self_force_amplitude * math.sin(self_force_orientation)
-
-            # set the energy cost penalty
-            if self.use_energy_cost:
-                energy_cost_penalty.append( -(self_force_amplitude / self.max_acceleration + abs(self_force_orientation) / self.max_turn) / 100)
 
             # DRAGGING FORCE
             dragging_force_amplitude = math.sqrt(agent.speed_x**2 + agent.speed_y**2) * self.dragging_force_coefficient
@@ -314,135 +295,137 @@ class CustomEnvironment(MultiAgentEnv):
             agent.loc_x += agent.speed_x
             agent.loc_y += agent.speed_y
 
-        return energy_cost_penalty
-
-    def _get_reward(self, energy_cost_penalty):
+    def _get_reward(self, action_list):
         # Initialize rewards
         reward_list = {agent.agent_id: 0 for agent in self.agents}
 
-        for i, agent in enumerate(self.agents):
+        for agent in self.agents:
             if agent.still_in_game:
-                is_prey = not agent.agent_type  # 0 for prey, 1 for predator
+                # AGENT EATEN OR NOT
+                if agent.agent_type == 0:# 0 for prey, 1 for predator
+                    reward_list[agent.agent_id] += self.surviving_reward_for_prey
 
-                if is_prey:
-                    reward_list[i] += self.surviving_reward_for_prey
-                    min_dist = self.stage_size * math.sqrt(2.0)
-
-                    for j, other_agent in enumerate(self.agents):
+                    for other_agent in self.agents:
                         # We compare distance with predators
-                        is_predator = other_agent.agent_type == 1
-                        if is_predator:
+                        if other_agent.agent_type == 1:
                             dist = ComputeDistance(agent, other_agent)
-                            if dist < min_dist:
-                                min_dist = dist
-                                nearest_predator_id = j
-                    if min_dist < self.eating_distance:
-                        # The prey is eaten
-                        reward_list[nearest_predator_id] += self.eating_reward_for_predator
-                        reward_list[i] += self.death_penalty_for_prey
-                        self.num_preys -= 1
-                        agent.still_in_game = 0
+                            if dist < other_agent.size + agent.size:
+                                # The prey is eaten
+                                reward_list[other_agent.agent_id] += self.eating_reward_for_predator
+                                reward_list[agent.agent_id] += self.death_penalty_for_prey
+                                self.num_preys -= 1
+                                agent.still_in_game = 0
                 else:  # is_predator
-                    reward_list[i] += self.starving_penalty_for_predator
+                    reward_list[agent.agent_id] += self.starving_penalty_for_predator
 
-            # Add the edge hit penalty
-            has_crossed_edge = (
-                    agent.loc_x < agent.size
-                    or agent.loc_x > self.stage_size - agent.size
-                    or agent.loc_y < agent.size
-                    or agent.loc_y > self.stage_size - agent.size
-            )
+                # EDGE CROSSING
+                # Add the edge hit penalty
+                has_crossed_edge = (
+                        agent.loc_x < agent.size
+                        or agent.loc_x > self.stage_size - agent.size
+                        or agent.loc_y < agent.size
+                        or agent.loc_y > self.stage_size - agent.size
+                )
+    
+                if has_crossed_edge:
+                    reward_list[agent.agent_id] += self.edge_hit_penalty
 
-            # EDGE CROSSING
-            # Clip x and y if agent has crossed edge
-            if has_crossed_edge:
-                if agent.loc_x < 0:
-                    agent.loc_x = 0.0
-                elif agent.loc_x > self.stage_size:
-                    agent.loc_x = self.stage_size
-
-                if agent.loc_y < 0:
-                    agent.loc_y = 0.0
-                elif agent.loc_y > self.stage_size:
-                    agent.loc_y = self.stage_size
-
-                reward_list[i] += self.edge_hit_penalty
-
-            # Add the energy efficiency penalty
-            reward_list[i] += energy_cost_penalty[i] / 2
+                # ENERGY EFFICIENCY
+                # Add the energy efficiency penalty
+                # set the energy cost penalty
+                if self.use_energy_cost:
+                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+    
+                    energy_cost_penalty = -(
+                        self_force_amplitude / self.max_acceleration 
+                        + abs(self_force_orientation) / self.max_turn
+                    ) / 100
+                    reward_list[agent.agent_id] += energy_cost_penalty
 
         return reward_list
 
     def _get_done(self):
         # Assuming that all agents terminate at the same time.
         done_for_all = self.timestep >= self.episode_length
-
         dones = {agent_id: done_for_all for agent_id in self._agent_ids}
         dones['__all__'] = done_for_all
-        truncateds = dones
 
-        return dones, truncateds
+        return dones, dones
 
 
 if __name__ == "__main__":
+    import os
+    
+    import ray
+    from ray import air, tune
+    from ray.rllib.utils.test_utils import check_learning_achieved
+    from ray.rllib.policy.policy import PolicySpec
+    from ray.rllib.algorithms.ppo import PPOConfig
+    
+    from custom_env import CustomEnvironment
     from config import run_config
-    from ray import tune
-
-    # From https://docs.ray.io/en/latest/tune/examples/includes/pb2_ppo_example.html
-    # and https://github.com/ray-project/ray/issues/35923
-    from ray.tune.schedulers import PopulationBasedTraining
-    import random
-        def explore(config):
-        # Ensure we collect enough timesteps to do sgd.
-        if config["train_batch_size"] < config["sgd_minibatch_size"] * 2:
-            config["train_batch_size"] = config["sgd_minibatch_size"] * 2
-        # Ensure we run at least one sgd iter.
-        if config["lambda"] > 1:
-            config["lambda"] = 1
-        config["train_batch_size"] = int(config["train_batch_size"])
-        return config
-        
-    pbt_scheduler = PopulationBasedTraining(
-        time_attr='training_iteration',
-        metric="episode_reward_mean",
-        mode="max",
-        perturbation_interval=5,
-        quantile_fraction=0.25,
-        # Specifies the search space for these hyperparams
-        hyperparam_mutations={
-            "lambda": lambda: random.uniform(0.9, 1.0),
-            "clip_param": lambda: random.uniform(0.1, 0.5),
-            "lr": lambda: random.uniform(1e-3, 1e-5),
-            "train_batch_size": lambda: random.randint(1000, 60000),
-        },
-        custom_explore_fn=explore,
     
-    ## and workarround (that doesn't work)
-
-
-        
+    
+    
+    class Args:
+        def __init__(self):
+            self.run = "PPO"
+            self.framework = "torch" # "tf2" or "torch"
+            self.stop_iters = 50
+            self.stop_timesteps = 100000
+            self.stop_reward = 0.1
+            self.as_test = False
+    
+    args = Args()
+    
+    ray.init()
     env = CustomEnvironment(run_config["env"])
-
     
-    tune.run(
-        "PPO",
-        stop={
-            "timesteps_total": 500,
-            "episode_reward_mean": 7.99,
-        },
-        config={
-            "env": CustomEnvironment,
-            "env_config": run_config["env"],
-            "batch_mode": "complete_episodes",
-            "num_workers": 0,
-            "multiagent": {
-                "policies": {
-                    "prey": (None, env.observation_space,
-                             env.action_space, {}),
-                    "predator": (None, env.observation_space,
-                                 env.action_space, {}),
-                },
-                "policy_mapping_fn": lambda x: "prey" if x <=env.num_prey else "predator",
+    config = (
+        PPOConfig()
+        .rollouts(rollout_fragment_length="auto", num_rollout_workers=0)
+        .environment(CustomEnvironment, env_config=run_config["env"])
+        .framework(args.framework)
+        .training(num_sgd_iter=10, sgd_minibatch_size=256, train_batch_size=4000)
+        .multi_agent(
+            policies= {
+                "prey": PolicySpec(
+                    policy_class=None,  # infer automatically from Algorithm
+                    observation_space=env.observation_space[0],  # if None infer automatically from env
+                    action_space=env.action_space[0],  # if None infer automatically from env
+                    config={"gamma": 0.85},  # use main config plus <- this override here
+                ),
+                "predator": PolicySpec(
+                    policy_class=None,
+                    observation_space=env.observation_space[0],
+                    action_space=env.action_space[0],
+                    config={"gamma": 0.85},
+                ),
             },
-        },
-        scheduler=pbt_scheduler)
+            policy_mapping_fn = lambda id, *arg, **karg: "prey" if env.agents[id].agent_type == 0 else "predator",
+            policies_to_train=["prey", "predator"]
+        )
+        .rl_module(_enable_rl_module_api=True)
+        .training(_enable_learner_api=True)
+        .resources(num_gpus=0)
+    )
+    
+    #my_ma_algo = config.build()
+    #my_ma_algo.train()
+    stop = {
+        "training_iteration": args.stop_iters,
+        "timesteps_total": args.stop_timesteps,
+        "episode_reward_mean": args.stop_reward,
+    }
+    
+    tuner = tune.Tuner(
+        args.run,
+        param_space=config.to_dict(),
+        run_config=air.RunConfig(stop=stop, verbose=3),
+    )
+    results = tuner.fit()
+    
+    if args.as_test:
+        print("Checking if learning goals were achieved")
+        check_learning_achieved(results, args.stop_reward)
+    ray.shutdown()

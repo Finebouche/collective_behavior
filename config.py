@@ -21,8 +21,6 @@ run_config = dict(
         min_acceleration=0,
         max_turn=np.pi / 2,  # pi radians
         min_turn=- np.pi / 2,  # pi radians
-        num_acceleration_levels=10,
-        num_turn_levels=10,
         # Reward parameters
         starving_penalty_for_predator=-0.1,
         eating_reward_for_predator=10.0,
