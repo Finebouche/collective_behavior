@@ -62,6 +62,7 @@ class CustomEnvironment(MultiAgentEnv):
         if seed is not None:
             self.np_random, seed = seeding.np_random(seed)
 
+        # ENVIRONMENT
         self.episode_length = config.get('episode_length')
         assert self.episode_length > 0
         self.preparation_length = config.get('preparation_length')
@@ -70,6 +71,7 @@ class CustomEnvironment(MultiAgentEnv):
         assert self.stage_size > 0
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
+        # AGENTS
         self.num_preys = config.get('num_preys')
         self.num_predators = config.get('num_predators')
         assert self.num_preys > 0
@@ -94,6 +96,7 @@ class CustomEnvironment(MultiAgentEnv):
 
         self.eating_distance = self.prey_size + self.predator_size
 
+        # PHYSICS
         self.max_speed = config.get('max_speed')
         self.min_speed = config.get('min_speed')
 
@@ -112,13 +115,8 @@ class CustomEnvironment(MultiAgentEnv):
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(low=np.array([self.min_acceleration, self.min_turn]), high=np.array([self.max_acceleration, self.max_turn]), shape=(2,), dtype=self.float_dtype) for agent in self.agents
         })
-        #self.action_space = spaces.Box(
-        #    low=np.array([self.min_acceleration, self.min_turn]), 
-        #    high=np.array([self.max_acceleration, self.max_turn]),
-        #    shape=(2,),
-        #    dtype=self.float_dtype
-        #)
-        
+
+        # OBSERVATION
         use_full_observation = config.get('use_full_observation')
         num_other_agents_observed = config.get('num_other_agents_observed')
         max_seeing_angle = config.get('max_seeing_angle')
@@ -129,27 +127,22 @@ class CustomEnvironment(MultiAgentEnv):
             raise ValueError("Only one of use_full_observation, num_other_agents_observed, and max_seeing_angle should be set.")
 
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=-1, high=1, shape=(6 * self.num_agents + 4,), dtype=self.float_dtype) for agent in self.agents
+            agent.agent_id: spaces.Box(low=-1, high=1, shape=(5 * self.num_agents + 4,), dtype=self.float_dtype) for agent in self.agents
         })
-        #self.observation_space = spaces.Box(low=-1, high=1, shape=(6 * self.num_agents + 4,), dtype=self.float_dtype)
 
         self.use_full_observation = use_full_observation
         self.num_other_agents_observed = self.num_agents if num_other_agents_observed is None else num_other_agents_observed
         self.max_seeing_angle = self.stage_size / np.sqrt(2) if max_seeing_angle is None else max_seeing_angle
         self.max_seeing_distance = np.pi if max_seeing_distance is None else max_seeing_distance
-
-        self.use_time_in_observation = config.get('use_time_in_observation')
+        
         self.use_polar_coordinate = config.get('use_polar_coordinate')
 
-        self.init_obs = None
-
+        # REWARDS
         self.starving_penalty_for_predator = config.get('starving_penalty_for_predator')
         self.eating_reward_for_predator = config.get('eating_reward_for_predator')
         self.surviving_reward_for_prey = config.get('surviving_reward_for_prey')
         self.death_penalty_for_prey = config.get('death_penalty_for_prey')
         self.edge_hit_penalty = config.get('edge_hit_penalty')
-        self.end_of_game_penalty = config.get('end_of_game_penalty')
-        self.end_of_game_reward = config.get('end_of_game_reward')
         self.use_energy_cost = config.get('use_energy_cost')
 
     def _generate_observation(self, agent):
@@ -157,7 +150,7 @@ class CustomEnvironment(MultiAgentEnv):
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(6 * self.num_agents + 4, dtype=self.float_dtype)
+        obs = np.zeros(5 * self.num_agents + 4, dtype=self.float_dtype)
 
         # Generate observation for each agent
         obs[0] = agent.speed_x / self.max_speed
@@ -169,31 +162,26 @@ class CustomEnvironment(MultiAgentEnv):
         obs[5] = agent.loc_y / self.stage_size
         obs[6] = agent.orientation / (2*np.pi)
         obs[7] = agent.size
-        obs[8] = agent.still_in_game
-        obs[9] = agent.agent_type
+        obs[8] = agent.agent_type
 
         # Add the agent position and speed to the observation
-        j = 10  # start adding at this index after adding the initial properties
+        j = 9  # start adding at this index after adding the initial properties
         for other in self.agents:
-            if other is agent:
+            if other is agent or other.still_in_game == 0:
                 continue
             obs[j] = (other.loc_x - agent.loc_x) / self.stage_size
             obs[j + 1] = (other.loc_y - agent.loc_y) / self.stage_size
             obs[j + 2] = (other.orientation - agent.orientation) / (2*np.pi)
             obs[j + 3] = other.size
-            obs[j + 4] = other.still_in_game
-            obs[j + 5] = other.agent_type
-            j += 6  # move to the next 6 indices for the next agent
+            obs[j + 4] = other.agent_type
+            j += 5  # move to the next 6 indices for the next agent
 
         return obs
 
     def _get_observation_list(self):
-        return {agent.agent_id: self._generate_observation(agent) for agent in self.agents}
+        return {agent.agent_id: self._generate_observation(agent) for agent in self.agents if agent.still_in_game==1}
 
     def reset(self, seed=None, options=None):
-        """
-        Env reset(). when done is called
-        """
         # Reset time to the beginning
         self.timestep = 0
 
@@ -212,6 +200,7 @@ class CustomEnvironment(MultiAgentEnv):
 
     def step(self, action_list):
         self.timestep += 1
+
         self._simulate_one_step(action_list)
 
         observation_list = self._get_observation_list()
@@ -227,73 +216,73 @@ class CustomEnvironment(MultiAgentEnv):
 
     def _simulate_one_step(self, action_list):
         for agent in self.agents:
-            # get the actions for this agent
-            self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
-            
-            self_force_orientation = agent.orientation + self_force_orientation
-            acceleration_x = self_force_amplitude * math.cos(self_force_orientation)
-            acceleration_y = self_force_amplitude * math.sin(self_force_orientation)
-
-            # DRAGGING FORCE
-            dragging_force_amplitude = math.sqrt(agent.speed_x**2 + agent.speed_y**2) * self.dragging_force_coefficient
-            dragging_force_orientation = agent.orientation - math.pi  # opposed to the current speed
-            acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
-            acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
-
-            # BUMP INTO OTHER AGENTS
-            # contact_force
-            if self.contact_force_coefficient > 0:
-                for other_agent in self.agents:
-                    if agent.agent_type == other_agent.agent_type and agent.agent_id != other_agent.agent_id:
-                        dist = ComputeDistance(agent, other_agent)
-                        if dist < other_agent.size + agent.size:
-                            contact_force_amplitude = self.contact_force_coefficient * (other_agent.size + agent.size - dist)
-                            contact_force_orientation = ComputeAngle(agent, other_agent) - math.pi  # opposed to the contact direction
-                            acceleration_x += contact_force_amplitude * math.cos(contact_force_orientation)
-                            acceleration_y += contact_force_amplitude * math.sin(contact_force_orientation)
-
-            # WALL BOUNCING
-            # Check if the agent has crossed the edge
-            is_touching_edge = (
-                    agent.loc_x < agent.size
-                    or agent.loc_x > self.stage_size - agent.size
-                    or agent.loc_y < agent.size
-                    or agent.loc_y > self.stage_size - agent.size
-            )
-            if is_touching_edge and self.wall_contact_force_coefficient > 0:
-                contact_force_amplitude_x = self.wall_contact_force_coefficient * min(-agent.loc_x + agent.size,
-                                                                                      agent.size - self.stage_size + agent.loc_x)
-                contact_force_amplitude_y = self.wall_contact_force_coefficient * min(-agent.loc_y + agent.size,
-                                                                                      agent.size - self.stage_size + agent.loc_y)
-                acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
-                acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
-
-            # UPDATE ACCELERATION/SPEED
-            # Compute the amplitude and turn in polar coordinate
-            agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
-            if agent.acceleration_amplitude > self.max_acceleration: 
-                acceleration_x = acceleration_x * self.max_acceleration/agent.acceleration_amplitude
-                acceleration_y = acceleration_y * self.max_acceleration/agent.acceleration_amplitude
-                agent.acceleration_amplitude = self.max_acceleration
-            agent.acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
-
-            # Compute the speed using projection
-            speed_x = agent.speed_x + acceleration_x
-            speed_y = agent.speed_y + acceleration_y
-
-            # Update the agent's acceleration and directions
-            agent.orientation = math.atan2(speed_y, speed_x) * agent.still_in_game
-            agent.speed = math.sqrt(speed_x ** 2 + speed_y ** 2) * agent.still_in_game
-
-            # speed clipping
-            if agent.speed > self.max_speed:
-                agent.speed_x = agent.speed_x * self.max_speed/agent.speed
-                agent.speed_y = agent.speed_y * self.max_speed/agent.speed
-
-            # UPDATE POSITION
-            # Update the agent's location
-            agent.loc_x += agent.speed_x
-            agent.loc_y += agent.speed_y
+            if agent.still_in_game:
+                # get the actions for this agent
+                self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                
+                self_force_orientation = agent.orientation + self_force_orientation
+                acceleration_x = self_force_amplitude * math.cos(self_force_orientation)
+                acceleration_y = self_force_amplitude * math.sin(self_force_orientation)
+    
+                # DRAGGING FORCE
+                dragging_force_amplitude = math.sqrt(agent.speed_x**2 + agent.speed_y**2) * self.dragging_force_coefficient
+                dragging_force_orientation = agent.orientation - math.pi  # opposed to the current speed
+                acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
+                acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
+    
+                # BUMP INTO OTHER AGENTS
+                # contact_force
+                if self.contact_force_coefficient > 0:
+                    for other_agent in self.agents:
+                        if agent.agent_type == other_agent.agent_type and agent.agent_id != other_agent.agent_id:
+                            dist = ComputeDistance(agent, other_agent)
+                            if dist < other_agent.size + agent.size:
+                                contact_force_amplitude = self.contact_force_coefficient * (other_agent.size + agent.size - dist)
+                                contact_force_orientation = ComputeAngle(agent, other_agent) - math.pi  # opposed to the contact direction
+                                acceleration_x += contact_force_amplitude * math.cos(contact_force_orientation)
+                                acceleration_y += contact_force_amplitude * math.sin(contact_force_orientation)
+    
+                # WALL BOUNCING
+                # Check if the agent has crossed the edge
+                is_touching_edge = (
+                        agent.loc_x < agent.size
+                        or agent.loc_x > self.stage_size - agent.size
+                        or agent.loc_y < agent.size
+                        or agent.loc_y > self.stage_size - agent.size
+                )
+                if is_touching_edge and self.wall_contact_force_coefficient > 0:
+                    contact_force_amplitude_x = self.wall_contact_force_coefficient * min(-agent.loc_x + agent.size,
+                                                                                          agent.size - self.stage_size + agent.loc_x)
+                    contact_force_amplitude_y = self.wall_contact_force_coefficient * min(-agent.loc_y + agent.size,
+                                                                                          agent.size - self.stage_size + agent.loc_y)
+                    acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
+                    acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
+    
+                # UPDATE ACCELERATION/SPEED/POSITION
+                # Compute the amplitude and turn in polar coordinate
+                agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
+                if agent.acceleration_amplitude > self.max_acceleration: 
+                    acceleration_x = acceleration_x * self.max_acceleration/agent.acceleration_amplitude
+                    acceleration_y = acceleration_y * self.max_acceleration/agent.acceleration_amplitude
+                    agent.acceleration_amplitude = self.max_acceleration
+                agent.acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
+    
+                # Compute the speed using projection
+                speed_x = agent.speed_x + acceleration_x
+                speed_y = agent.speed_y + acceleration_y
+    
+                # Update the agent's acceleration and directions
+                agent.orientation = math.atan2(speed_y, speed_x) * agent.still_in_game
+                agent.speed = math.sqrt(speed_x ** 2 + speed_y ** 2) * agent.still_in_game
+    
+                # speed clipping
+                if agent.speed > self.max_speed:
+                    agent.speed_x = agent.speed_x * self.max_speed/agent.speed
+                    agent.speed_y = agent.speed_y * self.max_speed/agent.speed
+    
+                # Update the agent's location
+                agent.loc_x += agent.speed_x
+                agent.loc_y += agent.speed_y
 
     def _get_reward(self, action_list):
         # Initialize rewards
@@ -345,17 +334,20 @@ class CustomEnvironment(MultiAgentEnv):
         return reward_list
 
     def _get_done(self):
-        # Assuming that all agents terminate at the same time.
-        done_for_all = self.timestep >= self.episode_length
+        # True at the end
+        done_for_all = self.timestep >= self.episode_length or self.num_preys == 0
         dones = {agent_id: done_for_all for agent_id in self._agent_ids}
+        # True when agent are eaten
+        truncateds = {agent.agent_id: agent.still_in_game == 0 for agent in self.agents}
+        
         dones['__all__'] = done_for_all
+        truncateds['__all__'] = done_for_all
 
-        return dones, dones
+        return dones, truncateds
 
 
 if __name__ == "__main__":
     import os
-    
     import ray
     from ray import air, tune
     from ray.rllib.utils.test_utils import check_learning_achieved
@@ -364,8 +356,6 @@ if __name__ == "__main__":
     
     from custom_env import CustomEnvironment
     from config import run_config
-    
-    
     
     class Args:
         def __init__(self):
@@ -410,8 +400,7 @@ if __name__ == "__main__":
         .resources(num_gpus=0)
     )
     
-    #my_ma_algo = config.build()
-    #my_ma_algo.train()
+    
     stop = {
         "training_iteration": args.stop_iters,
         "timesteps_total": args.stop_timesteps,
