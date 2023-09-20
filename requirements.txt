@@ -5,3 +5,4 @@ torch
 
 fsspec
 supersuit
+wandb
