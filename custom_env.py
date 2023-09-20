@@ -186,11 +186,11 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = 0
 
         for agent in self.agents:
-            agent.loc_x = self.np_random.random()
-            agent.loc_y = self.np_random.random()
+            agent.loc_x = self.np_random.random() * self.stage_size
+            agent.loc_y = self.np_random.random() * self.stage_size
             agent.speed_x = 0.0
             agent.speed_y = 0.0
-            agent.orientation = self.np_random.random()
+            agent.orientation = self.np_random.random() * 2 * np.pi
             agent.acceleration_amplitude = 0.0
             agent.acceleration_orientation = 0.0
             agent.still_in_game = 1 # True = 1 and False = 0
