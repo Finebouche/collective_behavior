@@ -15,7 +15,7 @@ run_config = dict(
         prey_size=0.1,
         predator_size=0.2,
         min_speed=0,
-        max_speed=100,
+        max_speed=1,
         # Action parameters
         max_acceleration=0.1,
         min_acceleration=0,

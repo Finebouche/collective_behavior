@@ -6,3 +6,4 @@ torch
 fsspec
 supersuit
 wandb
+matplotlib

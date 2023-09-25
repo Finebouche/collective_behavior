@@ -72,7 +72,8 @@ class CustomEnvironment(MultiAgentEnv):
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
         # AGENTS
-        self.num_preys = config.get('num_preys')
+        self.ini_num_preys = config.get('num_preys')
+        self.num_preys = self.ini_num_preys
         self.num_predators = config.get('num_predators')
         assert self.num_preys > 0
         assert self.num_predators > 0
@@ -92,9 +93,10 @@ class CustomEnvironment(MultiAgentEnv):
                 agent_type = 1 # for predators
                 size = self.predator_size
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, size=size))
-        self._agent_ids = {agent.agent_id for agent in self.agents}
 
         self.eating_distance = self.prey_size + self.predator_size
+        #Used by RLlib
+        self._agent_ids = {agent.agent_id for agent in self.agents}
 
         # PHYSICS
         self.max_speed = config.get('max_speed')
@@ -158,8 +160,8 @@ class CustomEnvironment(MultiAgentEnv):
         obs[2] = agent.acceleration_amplitude / self.max_acceleration
         obs[3] = agent.acceleration_orientation / (2*np.pi)
 
-        obs[4] = agent.loc_x / self.stage_size
-        obs[5] = agent.loc_y / self.stage_size
+        obs[4] = agent.loc_x / (self.stage_size*np.sqrt(2))
+        obs[5] = agent.loc_y / (self.stage_size*np.sqrt(2))
         obs[6] = agent.orientation / (2*np.pi)
         obs[7] = agent.size
         obs[8] = agent.agent_type
@@ -169,8 +171,8 @@ class CustomEnvironment(MultiAgentEnv):
         for other in self.agents:
             if other is agent or other.still_in_game == 0:
                 continue
-            obs[j] = (other.loc_x - agent.loc_x) / self.stage_size
-            obs[j + 1] = (other.loc_y - agent.loc_y) / self.stage_size
+            obs[j] = (other.loc_x - agent.loc_x) / (self.stage_size*np.sqrt(2))
+            obs[j + 1] = (other.loc_y - agent.loc_y) / (self.stage_size*np.sqrt(2))
             obs[j + 2] = (other.orientation - agent.orientation) / (2*np.pi)
             obs[j + 3] = other.size
             obs[j + 4] = other.agent_type
@@ -184,7 +186,8 @@ class CustomEnvironment(MultiAgentEnv):
     def reset(self, seed=None, options=None):
         # Reset time to the beginning
         self.timestep = 0
-
+        self.num_preys = self.ini_num_preys
+        
         for agent in self.agents:
             agent.loc_x = self.np_random.random() * self.stage_size
             agent.loc_y = self.np_random.random() * self.stage_size
@@ -268,21 +271,26 @@ class CustomEnvironment(MultiAgentEnv):
                 agent.acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
     
                 # Compute the speed using projection
-                speed_x = agent.speed_x + acceleration_x
-                speed_y = agent.speed_y + acceleration_y
+                agent.speed_x += acceleration_x
+                agent.speed_y += acceleration_y
     
-                # Update the agent's acceleration and directions
-                agent.orientation = math.atan2(speed_y, speed_x) * agent.still_in_game
-                agent.speed = math.sqrt(speed_x ** 2 + speed_y ** 2) * agent.still_in_game
     
                 # speed clipping
+                agent.speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2) * agent.still_in_game
                 if agent.speed > self.max_speed:
                     agent.speed_x = agent.speed_x * self.max_speed/agent.speed
                     agent.speed_y = agent.speed_y * self.max_speed/agent.speed
-    
+
+                # Update the agent's orientation
+                agent.orientation = math.atan2(agent.speed_y , agent.speed_x) * agent.still_in_game
+                
                 # Update the agent's location
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
+
+                # speed clipping
+                agent.loc_x = np.clip(agent.loc_x, 0, self.stage_size)
+                agent.loc_y = np.clip(agent.loc_y, 0, self.stage_size)
 
     def _get_reward(self, action_list):
         # Initialize rewards
@@ -307,18 +315,6 @@ class CustomEnvironment(MultiAgentEnv):
                 else:  # is_predator
                     reward_list[agent.agent_id] += self.starving_penalty_for_predator
 
-                # EDGE CROSSING
-                # Add the edge hit penalty
-                has_crossed_edge = (
-                        agent.loc_x < agent.size
-                        or agent.loc_x > self.stage_size - agent.size
-                        or agent.loc_y < agent.size
-                        or agent.loc_y > self.stage_size - agent.size
-                )
-    
-                if has_crossed_edge:
-                    reward_list[agent.agent_id] += self.edge_hit_penalty
-
                 # ENERGY EFFICIENCY
                 # Add the energy efficiency penalty
                 # set the energy cost penalty
@@ -336,7 +332,7 @@ class CustomEnvironment(MultiAgentEnv):
     def _get_done(self):
         # True at the end
         done_for_all = self.timestep >= self.episode_length or self.num_preys == 0
-        dones = {agent_id: done_for_all for agent_id in self._agent_ids}
+        dones = {agent.agent_id: done_for_all for agent in self.agents}
         # True when agent are eaten
         truncateds = {agent.agent_id: agent.still_in_game == 0 for agent in self.agents}
         
