@@ -25,6 +25,10 @@ conda activate <env_name>
 
 Replace ```<env_name>``` with the name of your environment.
 
+### Clone this repo
+
+Use the way you prefer.
+
 ### Installing Dependencies
 
 To install the required dependencies, you can use the requirements.txt file. Run the following command:
