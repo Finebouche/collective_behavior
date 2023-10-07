@@ -145,7 +145,7 @@ class CustomEnvironment(MultiAgentEnv):
         self.surviving_reward_for_prey = config.get('surviving_reward_for_prey')
         self.death_penalty_for_prey = config.get('death_penalty_for_prey')
         self.edge_hit_penalty = config.get('edge_hit_penalty')
-        self.use_energy_cost = config.get('use_energy_cost')
+        self.energy_cost_penalty_coef = config.get('energy_cost_penalty_coef')
 
     def _generate_observation(self, agent):
         """
@@ -318,14 +318,13 @@ class CustomEnvironment(MultiAgentEnv):
                 # ENERGY EFFICIENCY
                 # Add the energy efficiency penalty
                 # set the energy cost penalty
-                if self.use_energy_cost:
-                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
-    
-                    energy_cost_penalty = -(
-                        self_force_amplitude / self.max_acceleration 
-                        + abs(self_force_orientation) / self.max_turn
-                    ) / 100
-                    reward_list[agent.agent_id] += energy_cost_penalty
+                self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+
+                energy_cost_penalty = -(
+                    self_force_amplitude / self.max_acceleration 
+                    + abs(self_force_orientation) / self.max_turn
+                ) * self.energy_cost_penalty_coef
+                reward_list[agent.agent_id] += energy_cost_penalty
 
         return reward_list
 
