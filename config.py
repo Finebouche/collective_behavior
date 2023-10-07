@@ -9,9 +9,9 @@ run_config = dict(
         episode_length=1000,
         preparation_length=120,
         # Physics
-        dragging_force_coefficient=0.5,
+        dragging_force_coefficient=0.3,
         contact_force_coefficient=0.2,
-        wall_contact_force_coefficient=0.2,
+        wall_contact_force_coefficient=0.4,
         prey_size=0.1,
         predator_size=0.2,
         min_speed=0,
@@ -24,11 +24,11 @@ run_config = dict(
         # Reward parameters
         # reward must be positive, penalty must be negative
         starving_penalty_for_predator=--0,
-        eating_reward_for_predator=1.0,
+        eating_reward_for_predator=10.0,
         surviving_reward_for_prey=0,
         death_penalty_for_prey=-10.0,
         edge_hit_penalty=-0,
-        use_energy_cost=True,
+        energy_cost_penalty_coef=0.001,
         
         # Observation parameters
         use_full_observation=False,  # Put False if not used
