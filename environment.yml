@@ -1,0 +1,17 @@
+name: collective_env
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - ray[rllib]
+    - gymnasium
+    - numpy
+    - tensorflow
+    - torch
+    - wandb
+    - matplotlib
+    - jupyterlab

@@ -9,21 +9,19 @@ run_config = dict(
         episode_length=1000,
         preparation_length=120,
         # Physics
-        dragging_force_coefficient=0.3,
+        dragging_force_coefficient=1,
         contact_force_coefficient=0.2,
         wall_contact_force_coefficient=0.4,
-        prey_size=0.1,
-        predator_size=0.2,
-        min_speed=0,
-        max_speed=1,
+        prey_radius=0.1,
+        predator_radius=0.2,
+        max_speed=0.5,
         # Action parameters
-        max_acceleration=0.1,
+        max_acceleration=1,
         min_acceleration=0,
         max_turn=np.pi / 2,  # pi radians
-        min_turn=- np.pi / 2,  # pi radians
         # Reward parameters
         # reward must be positive, penalty must be negative
-        starving_penalty_for_predator=--0,
+        starving_penalty_for_predator=-0,
         eating_reward_for_predator=10.0,
         surviving_reward_for_prey=0,
         death_penalty_for_prey=-10.0,
@@ -31,10 +29,9 @@ run_config = dict(
         energy_cost_penalty_coef=0.001,
         
         # Observation parameters
-        use_full_observation=False,  # Put False if not used
-        max_seeing_angle=None,  # Put None if not used
-        max_seeing_distance=None,  # Put None if not used
-        num_other_agents_observed=8,  # Put None if not used
+        max_seeing_angle=4*np.pi/3,  # Put None if not used (between 0 and pi)
+        max_seeing_distance=10,  # Put None if not used
+        num_other_agents_observed=8,  # Put "all" if not used
         use_polar_coordinate=True,
         seed=None,
     ),
