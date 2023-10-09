@@ -5,6 +5,9 @@ channels:
   - pytorch
 dependencies:
   - python=3.11
+  - ffmpeg
+  - jupyterlab
+  - matplotlib
   - pip
   - pip:
     - ray[rllib]
@@ -13,5 +16,3 @@ dependencies:
     - tensorflow
     - torch
     - wandb
-    - matplotlib
-    - jupyterlab

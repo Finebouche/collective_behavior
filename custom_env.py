@@ -325,7 +325,7 @@ class CustomEnvironment(MultiAgentEnv):
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
 
-                # speed clipping
+                # position clipping
                 agent.loc_x = np.clip(agent.loc_x, 0, self.stage_size)
                 agent.loc_y = np.clip(agent.loc_y, 0, self.stage_size)
 

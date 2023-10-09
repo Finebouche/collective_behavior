@@ -13,11 +13,9 @@ from mpl_toolkits.mplot3d import art3d
 def generate_animation(
         episode_states,
         env,
-        fps=50,
+        fps=2,
         predator_color="#C843C3",
-        predator_size=1,
         prey_color="#245EB6",
-        prey_size=0.1,
         runner_not_in_game_color="#666666",
         fig_width=6,
         fig_height=6,
@@ -37,7 +35,7 @@ def generate_animation(
 
     # Surface
     corner_points = [(0, 0), (0, env.stage_size), (env.stage_size, env.stage_size), (env.stage_size, 0)]
-    poly = Polygon(corner_points, color=(0.1, 0.2, 0.5, 0.15))
+    poly = Polygon(corner_points, color=runner_not_in_game_color, alpha=0.15)
     ax.add_patch(poly)
     art3d.pathpatch_2d_to_3d(poly, z=0, zdir="z")
 
@@ -57,19 +55,19 @@ def generate_animation(
 
     # count the number of non-nan values in episode_states
     num_frames = np.count_nonzero(~np.isnan(episode_states["loc_x"][:, 0]))
-    init_num_preys = env.num_agents - env.num_predators
+    init_num_preys = env.ini_num_preys
 
     # Init lines
     lines = [None for _ in range(env.num_agents)]
     for idx in range(env.num_agents):
-        if idx < env.num_preys:  # preys
+        if idx < env.ini_num_preys:  # preys
             lines[idx], = ax.plot(
                 episode_states["loc_x"][:1, idx],
                 episode_states["loc_y"][:1, idx],
                 [0],
                 color=prey_color,
                 marker="o",
-                markersize=env.prey_size * fig.dpi * fig_height / env.stage_size,
+                markersize=env.prey_radius * fig.dpi * fig_height / env.stage_size,
             )
         else:  # predators
             lines[idx], = ax.plot(
@@ -78,7 +76,7 @@ def generate_animation(
                 [0],
                 color=predator_color,
                 marker="o",
-                markersize=env.predator_size * fig.dpi * fig_height / env.stage_size,
+                markersize=env.predator_radius * fig.dpi * fig_height / env.stage_size,
             )
 
     labels = [None, None]
@@ -100,17 +98,16 @@ def generate_animation(
     # Animate
     def animate(i):
         for idx, line in enumerate(lines):
-            # Update drawing
-            line.set_data_3d(
-                episode_states["loc_x"][i: i + 1, idx],
-                episode_states["loc_y"][i: i + 1, idx],
-                [0],
-            )
 
             still_in_game = episode_states["still_in_the_game"][i, idx]
 
             if still_in_game:
-                pass
+                # Update drawing
+                line.set_data_3d(
+                    episode_states["loc_x"][i: i + 1, idx],
+                    episode_states["loc_y"][i: i + 1, idx],
+                    [0],
+                )
             else:
                 line.set_color(runner_not_in_game_color)
                 line.set_marker("")
