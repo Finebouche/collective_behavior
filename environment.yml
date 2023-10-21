@@ -8,6 +8,7 @@ dependencies:
   - ffmpeg
   - jupyterlab
   - matplotlib
+  - graph-tool
   - pip
   - pip:
     - ray[rllib]
