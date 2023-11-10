@@ -14,7 +14,7 @@ run_config = dict(
         wall_contact_force_coefficient=0.4,
         prey_radius=0.1,
         predator_radius=0.2,
-        max_speed=0.5,
+        max_speed=1,
         # Action parameters
         max_acceleration=1,
         min_acceleration=0,
@@ -29,7 +29,7 @@ run_config = dict(
         energy_cost_penalty_coef=0.001,
         
         # Observation parameters
-        max_seeing_angle=4*np.pi/3,  # Put None if not used (between 0 and pi)
+        max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
         max_seeing_distance=10,  # Put None if not used
         num_other_agents_observed=8,  # Put "all" if not used
         use_polar_coordinate=True,
