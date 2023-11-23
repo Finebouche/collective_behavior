@@ -34,6 +34,14 @@ def ComputeAngle(agent1, agent2):
     direction = (direction + np.pi) % (2 * np.pi) - np.pi
     return direction
 
+# function that check if variable is an array, then choose a random int in the interval
+# return the number and the max_value
+def random_int_in_interval(variable):
+    if isinstance(variable, list):
+        return np.random.randint(variable[0], variable[1]), variable[1]
+    else:
+        return variable, variable
+
 
 class ParticuleAgent:
     def __init__(self, id=None, radius=None, agent_type=None,
@@ -57,8 +65,8 @@ class CustomEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
 
         super().__init__()
-        self.float_dtype = np.float32
-        self.int_dtype = np.int32
+        self.float_dtype = np.float64
+        self.int_dtype = np.int64
         self.eps = self.float_dtype(1e-10)
 
         self.np_random = np.random
@@ -72,17 +80,24 @@ class CustomEnvironment(MultiAgentEnv):
         assert self.episode_length > 0
         self.preparation_length = config.get('preparation_length')
 
-        self.stage_size = config.get('stage_size')
+        # random stage size
+        stage_size = config.get('stage_size')
+        self.stage_size, _ = random_int_in_interval(stage_size)
         assert self.stage_size > 1
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
         # AGENTS
-        self.ini_num_preys = config.get('num_preys')
+        # random number of preys
+        ini_num_preys= config.get('num_preys')
+        self.ini_num_preys, self.max_num_preys = random_int_in_interval(ini_num_preys)
         self.num_preys = self.ini_num_preys
-        self.num_predators = config.get('num_predators')
+        # random number of predators
+        num_predators = config.get('num_predators')
+        self.num_predators, self.max_num_predators = random_int_in_interval(num_predators)
         assert self.num_preys > 0
         assert self.num_predators > 0
         self.num_agents = self.num_preys + self.num_predators
+        self.max_num_agents = self.max_num_preys + self.max_num_predators
 
         self.prey_radius = config.get('prey_radius')
         self.predator_radius = config.get('predator_radius')
@@ -90,13 +105,19 @@ class CustomEnvironment(MultiAgentEnv):
         assert 0 <= self.predator_radius <= 1
 
         self.agents = []
-        for i in range(self.num_agents):
-            if i < self.num_preys:
+        for i in range(self.max_num_agents):
+            if i < self.num_preys and i < self.num_agents:
                 agent_type = 0  # for preys
                 radius = self.prey_radius
-            else:
+                still_in_game = True
+            elif i >= self.num_preys and i < self.num_agents:
                 agent_type = 1  # for predators
                 radius = self.predator_radius
+                still_in_game = True
+            else:
+                agent_type = 0
+                radius = 0
+                still_in_game = False
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
@@ -369,7 +390,7 @@ class CustomEnvironment(MultiAgentEnv):
         # True at the end
         done_for_all = self.timestep >= self.episode_length or self.num_preys == 0
         dones = {agent.agent_id: done_for_all for agent in self.agents}
-        # True when agent are eaten
+        # True when agent are eaten or if agent id is over the num_agent (but under the max_num_agent)
         truncateds = {agent.agent_id: agent.still_in_game == 0 for agent in self.agents}
 
         dones['__all__'] = done_for_all

@@ -3,9 +3,9 @@ import numpy as np
 run_config = dict(
     # Environment settings
     env=dict(
-        num_preys=15,
-        num_predators=2,
-        stage_size=30,
+        num_preys=[20, 30],
+        num_predators=[2, 5],
+        stage_size=[30, 50],
         episode_length=1000,
         preparation_length=120,
         # Physics
@@ -30,38 +30,9 @@ run_config = dict(
         
         # Observation parameters
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
-        max_seeing_distance=10,  # Put None if not used
-        num_other_agents_observed=8,  # Put "all" if not used
+        max_seeing_distance=20,  # Put None if not used
+        num_other_agents_observed=6,  # Put "all" if not used
         use_polar_coordinate=True,
         seed=None,
-    ),
-    # Policy network settings
-    policies=dict(  # list all the policies below
-        prey=dict(
-            to_train=True,  # flag indicating whether the model needs to be trained
-            algorithm="PPO",  # algorithm used to train the policy
-            gamma=0.98,  # discount rate gamms
-            lr=0.001,  # learning rate
-            vf_loss_coeff=1,  # loss coefficient for the value function loss
-            entropy_coeff=[[0, 0.5], [2000000, 0.05]],  # entropy coefficient (can be a list of lists)
-            model=dict(  # policy model settings
-                type="prey_policy",
-                fc_dims=[64, 64, 64],  # dimension(s) of the fully connected layers as a list
-                model_ckpt_filepath="",  # filepath (used to restore a previously saved model)
-            ),
-        ),
-        predator=dict(
-            to_train=True,
-            algorithm="PPO",
-            gamma=0.98,
-            lr=0.001,
-            vf_loss_coeff=1,
-            entropy_coeff=[[0, 0.5], [2000000, 0.05]],  # entropy coefficient (can be a list of lists)
-            model=dict(
-                type="predator_policy",
-                fc_dims=[64, 64, 64],
-                model_ckpt_filepath="",
-            )
-        )
     ),
 )

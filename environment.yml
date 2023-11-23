@@ -15,5 +15,6 @@ dependencies:
     - gymnasium
     - numpy
     - tensorflow
+    - tensorflow-metal # [osx]
     - torch
     - wandb
