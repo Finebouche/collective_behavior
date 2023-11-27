@@ -3,7 +3,7 @@ import numpy as np
 run_config = dict(
     # Environment settings
     env=dict(
-        num_preys=[20, 30],
+        num_preys=[20, 60],
         num_predators=[2, 5],
         stage_size=[30, 50],
         episode_length=1000,

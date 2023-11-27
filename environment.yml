@@ -18,3 +18,4 @@ dependencies:
     - tensorflow-metal # [osx]
     - torch
     - wandb
+    - ipywidgets
