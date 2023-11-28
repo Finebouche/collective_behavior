@@ -65,8 +65,8 @@ class CustomEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
 
         super().__init__()
-        self.float_dtype = np.float64
-        self.int_dtype = np.int64
+        self.float_dtype = np.float32
+        self.int_dtype = np.int32
         self.eps = self.float_dtype(1e-10)
 
         self.np_random = np.random

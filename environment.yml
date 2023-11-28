@@ -4,18 +4,18 @@ channels:
   - conda-forge
   - pytorch
 dependencies:
-  - python=3.11
+  - python=3.10
   - ffmpeg
   - jupyterlab
   - matplotlib
   - graph-tool
   - pip
   - pip:
-    - ray[rllib]
+    - ray[default, rllib]
     - gymnasium
     - numpy
     - tensorflow
-    - tensorflow-metal # [osx]
+    #- tensorflow-metal # [osx] # doesn't seem to work
     - torch
     - wandb
     - ipywidgets
