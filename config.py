@@ -9,9 +9,9 @@ run_config = dict(
         episode_length=300,
         preparation_length=120,
         # Physics
-        dragging_force_coefficient=1,
-        contact_force_coefficient=0.2,
-        wall_contact_force_coefficient=0.4,
+        dragging_force_coefficient=0.5,
+        contact_force_coefficient=0.4,
+        wall_contact_force_coefficient=0.8,
         prey_radius=0.1,
         predator_radius=0.2,
         max_speed=1,

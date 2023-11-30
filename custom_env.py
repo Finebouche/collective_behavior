@@ -34,6 +34,7 @@ def ComputeAngle(agent1, agent2):
     direction = (direction + np.pi) % (2 * np.pi) - np.pi
     return direction
 
+
 # function that check if variable is an array, then choose a random int in the interval
 # return the number and the max_value
 def random_int_in_interval(variable):
@@ -88,7 +89,7 @@ class CustomEnvironment(MultiAgentEnv):
 
         # AGENTS
         # random number of preys
-        ini_num_preys= config.get('num_preys')
+        ini_num_preys = config.get('num_preys')
         self.ini_num_preys, self.max_num_preys = random_int_in_interval(ini_num_preys)
         self.num_preys = self.ini_num_preys
         # random number of predators
@@ -146,7 +147,7 @@ class CustomEnvironment(MultiAgentEnv):
         # OBSERVATION
         self.num_other_agents_observed = config.get('num_other_agents_observed')
         if not 0 < self.num_other_agents_observed <= self.num_agents - 1 or self.num_other_agents_observed == "all":
-            self.num_other_agents_observed = self.num_agents - 1
+            self.num_other_agents_observed = self.max_num_agents - 1
         self.max_seeing_angle = config.get('max_seeing_angle')
         if not 0 < self.max_seeing_angle <= np.pi:
             self.max_seeing_angle = np.pi
@@ -173,7 +174,7 @@ class CustomEnvironment(MultiAgentEnv):
     def _observation_pos(self, agent, other_agent):
         if not self.use_polar_coordinate:
             return (other_agent.loc_x - agent.loc_x) / self.grid_diagonal, (
-                        other_agent.loc_y - agent.loc_y) / self.grid_diagonal
+                    other_agent.loc_y - agent.loc_y) / self.grid_diagonal
         else:
             dist = ComputeDistance(agent, other_agent)
             direction = ComputeAngle(agent, other_agent)
@@ -397,78 +398,3 @@ class CustomEnvironment(MultiAgentEnv):
         truncateds['__all__'] = done_for_all
 
         return dones, truncateds
-
-
-if __name__ == "__main__":
-    import os
-    import ray
-    from ray import air, tune
-    from ray.rllib.utils.test_utils import check_learning_achieved
-    from ray.rllib.policy.policy import PolicySpec
-    from ray.rllib.algorithms.ppo import PPOConfig
-
-    from custom_env import CustomEnvironment
-    from config import run_config
-
-
-    class Args:
-        def __init__(self):
-            self.run = "PPO"
-            self.framework = "torch"  # "tf2" or "torch"
-            self.stop_iters = 50
-            self.stop_timesteps = 100000
-            self.stop_reward = 0.1
-            self.as_test = False
-
-
-    args = Args()
-
-    ray.init()
-    env = CustomEnvironment(run_config["env"])
-
-    config = (
-        PPOConfig()
-        .rollouts(rollout_fragment_length="auto", num_rollout_workers=0)
-        .environment(CustomEnvironment, env_config=run_config["env"])
-        .framework(args.framework)
-        .training(num_sgd_iter=10, sgd_minibatch_size=256, train_batch_size=4000)
-        .multi_agent(
-            policies={
-                "prey": PolicySpec(
-                    policy_class=None,  # infer automatically from Algorithm
-                    observation_space=env.observation_space[0],  # if None infer automatically from env
-                    action_space=env.action_space[0],  # if None infer automatically from env
-                    config={"gamma": 0.85},  # use main config plus <- this override here
-                ),
-                "predator": PolicySpec(
-                    policy_class=None,
-                    observation_space=env.observation_space[0],
-                    action_space=env.action_space[0],
-                    config={"gamma": 0.85},
-                ),
-            },
-            policy_mapping_fn=lambda id, *arg, **karg: "prey" if env.agents[id].agent_type == 0 else "predator",
-            policies_to_train=["prey", "predator"]
-        )
-        .rl_module(_enable_rl_module_api=True)
-        .training(_enable_learner_api=True)
-        .resources(num_gpus=0)
-    )
-
-    stop = {
-        "training_iteration": args.stop_iters,
-        "timesteps_total": args.stop_timesteps,
-        "episode_reward_mean": args.stop_reward,
-    }
-
-    tuner = tune.Tuner(
-        args.run,
-        param_space=config.to_dict(),
-        run_config=air.RunConfig(stop=stop, verbose=3),
-    )
-    results = tuner.fit()
-
-    if args.as_test:
-        print("Checking if learning goals were achieved")
-        check_learning_achieved(results, args.stop_reward)
-    ray.shutdown()
