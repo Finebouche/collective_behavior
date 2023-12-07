@@ -96,7 +96,7 @@ class CustomEnvironment(MultiAgentEnv):
         num_predators = config.get('num_predators')
         self.num_predators, self.max_num_predators = random_int_in_interval(num_predators)
         assert self.num_preys > 0
-        assert self.num_predators > 0
+        assert self.num_predators >= 0
         self.num_agents = self.num_preys + self.num_predators
         self.max_num_agents = self.max_num_preys + self.max_num_predators
 
@@ -296,7 +296,7 @@ class CustomEnvironment(MultiAgentEnv):
                                 acceleration_y += contact_force_amplitude * math.sin(contact_force_orientation)
 
                 # WALL BOUNCING
-                # Check if the agent has crossed the edge
+                # Check if the agent is touching the edge
                 is_touching_edge_x = (
                         agent.loc_x < agent.radius
                         or agent.loc_x > self.stage_size - agent.radius
@@ -384,6 +384,20 @@ class CustomEnvironment(MultiAgentEnv):
                         + abs(self_force_orientation) / self.max_turn
                 ) * self.energy_cost_penalty_coef
                 reward_list[agent.agent_id] += energy_cost_penalty
+
+                # WALL avoidance
+                # Check if the agent is touching the edge
+                is_touching_edge_x = (
+                        agent.loc_x < agent.radius
+                        or agent.loc_x > self.stage_size - agent.radius
+                )
+                is_touching_edge_y = (
+                        agent.loc_y < agent.radius
+                        or agent.loc_y > self.stage_size - agent.radius
+                )
+
+                if is_touching_edge_x or is_touching_edge_y:
+                    reward_list[agent.agent_id] += self.edge_hit_penalty
 
         return reward_list
 
