@@ -105,6 +105,9 @@ class CustomEnvironment(MultiAgentEnv):
         assert 0 <= self.prey_radius <= 1
         assert 0 <= self.predator_radius <= 1
 
+        self.agent_density = config.get('agent_density')
+        assert 0 < self.agent_density
+
         self.agents = []
         for i in range(self.max_num_agents):
             if i < self.num_preys and i < self.num_agents:
@@ -124,22 +127,21 @@ class CustomEnvironment(MultiAgentEnv):
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
 
         # PHYSICS
-        self.eating_distance = self.prey_radius + self.predator_radius
-
         self.max_speed = config.get('max_speed')
 
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
         self.contact_force_coefficient = config.get('contact_force_coefficient')
         self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
+        self.periodical_boundary = config.get('periodical_boundary')
+        if self.periodical_boundary is True:
+            self.wall_contact_force_coefficient = None
 
         # ACTIONS
         self.max_acceleration = config.get('max_acceleration')
-        self.min_acceleration = config.get('min_acceleration')
-
         self.max_turn = config.get('max_turn')
 
         self.action_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=np.array([self.min_acceleration, -self.max_turn]),
+            agent.agent_id: spaces.Box(low=np.array([0, -self.max_turn]),
                                        high=np.array([self.max_acceleration, self.max_turn]), shape=(2,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
@@ -159,7 +161,7 @@ class CustomEnvironment(MultiAgentEnv):
 
         # The observation space is a dict of Box spaces, one per agent.
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=-1, high=1, shape=(3 * self.num_other_agents_observed + 6,),
+            agent.agent_id: spaces.Box(low=-1, high=1, shape=(4 * self.num_other_agents_observed + 6,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
 
@@ -185,7 +187,7 @@ class CustomEnvironment(MultiAgentEnv):
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(3 * self.num_other_agents_observed + 6, dtype=self.float_dtype)
+        obs = np.zeros(4 * self.num_other_agents_observed + 6, dtype=self.float_dtype)
 
         # Generate observation for each agent
         obs[0] = agent.speed_x / self.max_speed
@@ -194,7 +196,7 @@ class CustomEnvironment(MultiAgentEnv):
         obs[3] = agent.loc_y / self.grid_diagonal
         # modulo 2pi to avoid large values
         obs[4] = agent.heading % (2 * np.pi) / (2 * np.pi)
-        obs[5] = agent.agent_type
+
 
         j = 6  # start adding at this index after adding the initial properties
 
@@ -214,9 +216,10 @@ class CustomEnvironment(MultiAgentEnv):
             if dist < self.max_seeing_distance:
                 direction = ComputeAngle(agent, other)
                 if abs(direction) < self.max_seeing_angle:
-                    obs[j], obs[j + 1] = self._observation_pos(agent, other)
-                    obs[j + 2] = other.agent_type
-                    j += 3
+                    obs[j], obs[j + 1] = self._observation_pos(agent, other)                            # relative position
+                    obs[j + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
+                    obs[j + 3] = other.agent_type
+                    j += 4
             number_of_observed_agent += 1
             if number_of_observed_agent == self.num_other_agents_observed:
                 break
@@ -231,7 +234,7 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = 0
         self.num_preys = self.ini_num_preys
 
-        for agent in self.agents:
+        for i, agent in enumerate(self.agents):
             agent.loc_x = self.np_random.random() * self.stage_size
             agent.loc_y = self.np_random.random() * self.stage_size
             agent.speed_x = 0.0
@@ -239,7 +242,10 @@ class CustomEnvironment(MultiAgentEnv):
             agent.heading = self.np_random.random() * 2 * np.pi
             agent.acceleration_amplitude = 0.0
             agent.acceleration_orientation = 0.0
-            agent.still_in_game = 1  # True = 1 and False = 0
+            if i < self.num_agents:
+                agent.still_in_game = 1  # True = 1 and False = 0
+            else:
+                agent.still_in_game = 0
 
         observation_list = self._get_observation_list()
         return observation_list, {}
@@ -262,7 +268,7 @@ class CustomEnvironment(MultiAgentEnv):
 
     def _simulate_one_step(self, action_list):
         for agent in self.agents:
-            if agent.still_in_game:
+            if agent.still_in_game == 1:
                 # get the actions for this agent
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
@@ -272,7 +278,7 @@ class CustomEnvironment(MultiAgentEnv):
 
                 # DRAGGING FORCE
                 dragging_force_amplitude = math.sqrt(
-                    agent.speed_x ** 2 + agent.speed_y ** 2) * self.dragging_force_coefficient
+                    agent.speed_x ** 2 + agent.speed_y ** 2) ** 2 * self.dragging_force_coefficient
                 dragging_force_orientation = agent.heading - math.pi  # opposed to the current speed
                 acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
                 acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
@@ -297,34 +303,35 @@ class CustomEnvironment(MultiAgentEnv):
 
                 # WALL BOUNCING
                 # Check if the agent is touching the edge
-                is_touching_edge_x = (
-                        agent.loc_x < agent.radius
-                        or agent.loc_x > self.stage_size - agent.radius
-                )
-                is_touching_edge_y = (
-                        agent.loc_y < agent.radius
-                        or agent.loc_y > self.stage_size - agent.radius
-                )
-
-                if is_touching_edge_x and self.wall_contact_force_coefficient > 0:
-                    # you can rarely have contact with two walls at the same time
-                    contact_force_amplitude_x = self.wall_contact_force_coefficient * (
-                        agent.radius - agent.loc_x if agent.loc_x < agent.radius
-                        else agent.loc_x - self.stage_size + agent.radius
+                if self.periodical_boundary is False:
+                    is_touching_edge_x = (
+                            agent.loc_x < agent.radius
+                            or agent.loc_x > self.stage_size - agent.radius
                     )
-                    acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
-
-                if is_touching_edge_y and self.wall_contact_force_coefficient > 0:
-                    contact_force_amplitude_y = self.wall_contact_force_coefficient * (
-                        agent.radius - agent.loc_y if agent.loc_y < agent.radius
-                        else agent.loc_y - self.stage_size + agent.radius
+                    is_touching_edge_y = (
+                            agent.loc_y < agent.radius
+                            or agent.loc_y > self.stage_size - agent.radius
                     )
 
-                    acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
+                    if is_touching_edge_x and self.wall_contact_force_coefficient > 0:
+                        # you can rarely have contact with two walls at the same time
+                        contact_force_amplitude_x = self.wall_contact_force_coefficient * (
+                            agent.radius - agent.loc_x if agent.loc_x < agent.radius
+                            else agent.loc_x - self.stage_size + agent.radius
+                        )
+                        acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
+
+                    if is_touching_edge_y and self.wall_contact_force_coefficient > 0:
+                        contact_force_amplitude_y = self.wall_contact_force_coefficient * (
+                            agent.radius - agent.loc_y if agent.loc_y < agent.radius
+                            else agent.loc_y - self.stage_size + agent.radius
+                        )
+
+                        acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
 
                 # UPDATE ACCELERATION/SPEED/POSITION
                 # Compute the amplitude and turn in polar coordinate
-                agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
+                agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (agent.radius ** 3 * self.agent_density)
                 if agent.acceleration_amplitude > self.max_acceleration:
                     acceleration_x = acceleration_x * self.max_acceleration / agent.acceleration_amplitude
                     acceleration_y = acceleration_y * self.max_acceleration / agent.acceleration_amplitude
@@ -341,15 +348,16 @@ class CustomEnvironment(MultiAgentEnv):
                     agent.speed_x = agent.speed_x * self.max_speed / speed
                     agent.speed_y = agent.speed_y * self.max_speed / speed
 
-                # agent.heading was update when computing the acceleration
-
+                # Note : agent.heading was updated right after getting the action list
                 # Update the agent's location
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
 
                 # position clipping
-                agent.loc_x = np.clip(agent.loc_x, 0, self.stage_size)
-                agent.loc_y = np.clip(agent.loc_y, 0, self.stage_size)
+                if self.periodical_boundary is True:
+                    agent.loc_x = agent.loc_x % self.stage_size
+                    agent.loc_y = agent.loc_y % self.stage_size
+
 
     def _get_reward(self, action_list):
         # Initialize rewards
@@ -365,7 +373,8 @@ class CustomEnvironment(MultiAgentEnv):
                         # We compare distance with predators
                         if other_agent.agent_type == 1:
                             dist = ComputeDistance(agent, other_agent)
-                            if dist < other_agent.radius + agent.radius:
+                            eating_distance = other_agent.radius + agent.radius
+                            if dist < eating_distance:
                                 # The prey is eaten
                                 reward_list[other_agent.agent_id] += self.eating_reward_for_predator
                                 reward_list[agent.agent_id] += self.death_penalty_for_prey
@@ -380,24 +389,25 @@ class CustomEnvironment(MultiAgentEnv):
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
                 energy_cost_penalty = -(
-                        self_force_amplitude / self.max_acceleration
+                        abs(self_force_amplitude) / self.max_acceleration
                         + abs(self_force_orientation) / self.max_turn
                 ) * self.energy_cost_penalty_coef
                 reward_list[agent.agent_id] += energy_cost_penalty
 
                 # WALL avoidance
                 # Check if the agent is touching the edge
-                is_touching_edge_x = (
-                        agent.loc_x < agent.radius
-                        or agent.loc_x > self.stage_size - agent.radius
-                )
-                is_touching_edge_y = (
-                        agent.loc_y < agent.radius
-                        or agent.loc_y > self.stage_size - agent.radius
-                )
+                if self.periodical_boundary is False:
+                    is_touching_edge_x = (
+                            agent.loc_x < agent.radius
+                            or agent.loc_x > self.stage_size - agent.radius
+                    )
+                    is_touching_edge_y = (
+                            agent.loc_y < agent.radius
+                            or agent.loc_y > self.stage_size - agent.radius
+                    )
 
-                if is_touching_edge_x or is_touching_edge_y:
-                    reward_list[agent.agent_id] += self.edge_hit_penalty
+                    if is_touching_edge_x or is_touching_edge_y:
+                        reward_list[agent.agent_id] += self.edge_hit_penalty
 
         return reward_list
 

@@ -121,6 +121,18 @@ def generate_animation_3d(
                 if i > 0:  # Ensure that there is a previous position to draw from
                     prev_x, prev_y = episode_states["loc_x"][i - 1, idx], episode_states["loc_y"][i - 1, idx]
                     curr_x, curr_y = episode_states["loc_x"][i, idx], episode_states["loc_y"][i, idx]
+                    # check that the agent has not moved to the other side of the map through the periodic boundary
+                    if np.abs(curr_x - prev_x) > env.stage_size / 2:
+                        if curr_x > prev_x:
+                            prev_x += env.stage_size
+                        else:
+                            prev_x -= env.stage_size
+                    if np.abs(curr_y - prev_y) > env.stage_size / 2:
+                        if curr_y > prev_y:
+                            prev_y += env.stage_size
+                        else:
+                            prev_y -= env.stage_size
+
                     trail_lines[idx].set_data_3d(
                         [prev_x, curr_x],
                         [prev_y, curr_y],
@@ -143,3 +155,4 @@ def generate_animation_3d(
     plt.close()
 
     return ani
+
