@@ -48,7 +48,7 @@ class ParticuleAgent:
     def __init__(self, id=None, radius=None, agent_type=None,
                  loc_x=None, loc_y=None, heading=None,
                  speed_x=None, speed_y=None,
-                 acceleration_amplitude=None, acceleration_orientation=None, still_in_game=True):
+                 still_in_game=True):
         self.agent_id = id
         self.agent_type = agent_type
         self.radius = radius
@@ -57,8 +57,6 @@ class ParticuleAgent:
         self.speed_x = speed_x
         self.speed_y = speed_y
         self.heading = heading
-        self.acceleration_amplitude = acceleration_amplitude
-        self.acceleration_orientation = acceleration_orientation
         self.still_in_game = still_in_game
 
 
@@ -113,22 +111,17 @@ class CustomEnvironment(MultiAgentEnv):
             if i < self.num_preys and i < self.num_agents:
                 agent_type = 0  # for preys
                 radius = self.prey_radius
-                still_in_game = True
             elif i >= self.num_preys and i < self.num_agents:
                 agent_type = 1  # for predators
                 radius = self.predator_radius
-                still_in_game = True
             else:
                 agent_type = 0
                 radius = 0
-                still_in_game = False
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
 
         # PHYSICS
-        self.max_speed = config.get('max_speed')
-
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
         self.contact_force_coefficient = config.get('contact_force_coefficient')
         self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
@@ -161,7 +154,7 @@ class CustomEnvironment(MultiAgentEnv):
 
         # The observation space is a dict of Box spaces, one per agent.
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=-1, high=1, shape=(4 * self.num_other_agents_observed + 6,),
+            agent.agent_id: spaces.Box(low=-1, high=1, shape=(4 * self.num_other_agents_observed + 3,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
 
@@ -187,18 +180,15 @@ class CustomEnvironment(MultiAgentEnv):
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(4 * self.num_other_agents_observed + 6, dtype=self.float_dtype)
+        obs = np.zeros(4 * self.num_other_agents_observed + 3, dtype=self.float_dtype)
 
         # Generate observation for each agent
-        obs[0] = agent.speed_x / self.max_speed
-        obs[1] = agent.speed_y / self.max_speed
-        obs[2] = agent.loc_x / self.grid_diagonal
-        obs[3] = agent.loc_y / self.grid_diagonal
+        obs[0] = agent.loc_x / self.grid_diagonal
+        obs[1] = agent.loc_y / self.grid_diagonal
         # modulo 2pi to avoid large values
-        obs[4] = agent.heading % (2 * np.pi) / (2 * np.pi)
+        obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
 
-
-        j = 6  # start adding at this index after adding the initial properties
+        j = 3  # start adding at this index after adding the initial properties
 
         # Remove the agent itself and the agents that are not in the game
         other_agents = [other_agent for other_agent in self.agents if
@@ -216,7 +206,7 @@ class CustomEnvironment(MultiAgentEnv):
             if dist < self.max_seeing_distance:
                 direction = ComputeAngle(agent, other)
                 if abs(direction) < self.max_seeing_angle:
-                    obs[j], obs[j + 1] = self._observation_pos(agent, other)                            # relative position
+                    obs[j], obs[j + 1] = self._observation_pos(agent, other)                      # relative position
                     obs[j + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
                     obs[j + 3] = other.agent_type
                     j += 4
@@ -240,8 +230,6 @@ class CustomEnvironment(MultiAgentEnv):
             agent.speed_x = 0.0
             agent.speed_y = 0.0
             agent.heading = self.np_random.random() * 2 * np.pi
-            agent.acceleration_amplitude = 0.0
-            agent.acceleration_orientation = 0.0
             if i < self.num_agents:
                 agent.still_in_game = 1  # True = 1 and False = 0
             else:
@@ -272,14 +260,15 @@ class CustomEnvironment(MultiAgentEnv):
                 # get the actions for this agent
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
-                agent.heading = agent.heading + self_force_orientation % (2 * np.pi)
+                agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
                 acceleration_x = self_force_amplitude * math.cos(agent.heading)
                 acceleration_y = self_force_amplitude * math.sin(agent.heading)
 
                 # DRAGGING FORCE
                 dragging_force_amplitude = math.sqrt(
                     agent.speed_x ** 2 + agent.speed_y ** 2) ** 2 * self.dragging_force_coefficient
-                dragging_force_orientation = agent.heading - math.pi  # opposed to the current speed
+                # opposed to the speed direction of previous step
+                dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
                 acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
                 acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
 
@@ -329,31 +318,21 @@ class CustomEnvironment(MultiAgentEnv):
 
                         acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
 
-                # UPDATE ACCELERATION/SPEED/POSITION
+                # # UPDATE ACCELERATION/SPEED/POSITION
                 # Compute the amplitude and turn in polar coordinate
-                agent.acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (agent.radius ** 3 * self.agent_density)
-                if agent.acceleration_amplitude > self.max_acceleration:
-                    acceleration_x = acceleration_x * self.max_acceleration / agent.acceleration_amplitude
-                    acceleration_y = acceleration_y * self.max_acceleration / agent.acceleration_amplitude
-                    agent.acceleration_amplitude = self.max_acceleration
-                agent.acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
+                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (agent.radius ** 3 * self.agent_density)
+                acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
 
                 # Compute the speed using projection
-                agent.speed_x += acceleration_x
-                agent.speed_y += acceleration_y
-
-                # speed clipping
-                speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2) * agent.still_in_game
-                if speed > self.max_speed:
-                    agent.speed_x = agent.speed_x * self.max_speed / speed
-                    agent.speed_y = agent.speed_y * self.max_speed / speed
+                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation)
+                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation)
 
                 # Note : agent.heading was updated right after getting the action list
                 # Update the agent's location
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
 
-                # position clipping
+                # periodic boundary
                 if self.periodical_boundary is True:
                     agent.loc_x = agent.loc_x % self.stage_size
                     agent.loc_y = agent.loc_y % self.stage_size
@@ -389,8 +368,8 @@ class CustomEnvironment(MultiAgentEnv):
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
                 energy_cost_penalty = -(
-                        abs(self_force_amplitude) / self.max_acceleration
-                        + abs(self_force_orientation) / self.max_turn
+                        abs(self_force_amplitude)
+                        + abs(self_force_orientation)
                 ) * self.energy_cost_penalty_coef
                 reward_list[agent.agent_id] += energy_cost_penalty
 
