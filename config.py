@@ -3,10 +3,10 @@ import numpy as np
 run_config = dict(
     # Environment settings
     env=dict(
-        num_preys=20,
-        num_predators=1,
-        stage_size=30,
-        episode_length=100,
+        num_preys=[10, 30],
+        num_predators=[1, 4],
+        stage_size=[20, 40],
+        episode_length=200,
         preparation_length=120,
         # Physics
         dragging_force_coefficient=0.5,
@@ -23,15 +23,18 @@ run_config = dict(
         # reward must be positive, penalty must be negative
         starving_penalty_for_predator=-0,
         eating_reward_for_predator=1.0,
+        collective_eating_reward_for_predator=0.1,
         surviving_reward_for_prey=0,
         death_penalty_for_prey=-1.0,
-        edge_hit_penalty=-0.1,
+        collective_death_penalty_for_prey=-0.1,
+        edge_hit_penalty=-0.01,
         energy_cost_penalty_coef=0.001,
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
         max_seeing_distance=20,  # Put None if not used
         num_other_agents_observed=6,  # Put "all" if not used
         use_polar_coordinate=True,
+        use_speed_observation=True,
         seed=None,
     ),
 )

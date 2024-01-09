@@ -151,18 +151,27 @@ class CustomEnvironment(MultiAgentEnv):
             self.max_seeing_distance = self.grid_diagonal
 
         self.use_polar_coordinate = config.get('use_polar_coordinate')
+        self.use_speed_observation = config.get('use_speed_observation')
 
+        self.num_observed_properties = 3
+        if self.use_speed_observation:
+            self.num_observed_properties += 2
         # The observation space is a dict of Box spaces, one per agent.
+        # we add 1 to the number of observed properties to add the observed agent type
+        self.observation_size = (self.num_observed_properties+1) * self.num_other_agents_observed + self.num_observed_properties
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=-1, high=1, shape=(4 * self.num_other_agents_observed + 3,),
+            agent.agent_id: spaces.Box(low=-1, high=1,
+                                       shape=(self.observation_size,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
 
         # REWARDS
         self.starving_penalty_for_predator = config.get('starving_penalty_for_predator')
         self.eating_reward_for_predator = config.get('eating_reward_for_predator')
+        self.collective_eating_reward_for_predator = config.get('collective_eating_reward_for_predator')
         self.surviving_reward_for_prey = config.get('surviving_reward_for_prey')
         self.death_penalty_for_prey = config.get('death_penalty_for_prey')
+        self.collective_death_penalty_for_prey = config.get('collective_death_penalty_for_prey')
         self.edge_hit_penalty = config.get('edge_hit_penalty')
         self.energy_cost_penalty_coef = config.get('energy_cost_penalty_coef')
 
@@ -180,15 +189,19 @@ class CustomEnvironment(MultiAgentEnv):
         Generate and return the observations for every agent.
         """
         # initialize obs as an empty list of correct size
-        obs = np.zeros(4 * self.num_other_agents_observed + 3, dtype=self.float_dtype)
+        obs = np.zeros(self.observation_size, dtype=self.float_dtype)
 
         # Generate observation for each agent
         obs[0] = agent.loc_x / self.grid_diagonal
         obs[1] = agent.loc_y / self.grid_diagonal
         # modulo 2pi to avoid large values
         obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
+        # speed
+        if self.use_speed_observation:
+            obs[3] = agent.speed_x / (2*self.max_acceleration)
+            obs[4] = agent.speed_y / (2*self.max_acceleration)
 
-        j = 3  # start adding at this index after adding the initial properties
+        j = self.num_observed_properties  # start adding at this index after adding the initial properties
 
         # Remove the agent itself and the agents that are not in the game
         other_agents = [other_agent for other_agent in self.agents if
@@ -208,9 +221,12 @@ class CustomEnvironment(MultiAgentEnv):
                 if abs(direction) < self.max_seeing_angle:
                     obs[j], obs[j + 1] = self._observation_pos(agent, other)                      # relative position
                     obs[j + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
-                    obs[j + 3] = other.agent_type
-                    j += 4
-            number_of_observed_agent += 1
+                    if self.use_speed_observation:
+                        obs[3] = agent.speed_x / (2*self.max_acceleration)
+                        obs[4] = agent.speed_y / (2*self.max_acceleration)
+                    obs[j + self.num_observed_properties] = other.agent_type
+                    j += (self.num_observed_properties + 1)
+                number_of_observed_agent += 1
             if number_of_observed_agent == self.num_other_agents_observed:
                 break
 
@@ -246,9 +262,9 @@ class CustomEnvironment(MultiAgentEnv):
         observation_list = self._get_observation_list()
 
         reward_list = self._get_reward(action_list)
-        dones, truncateds = self._get_done()
+        terminated, truncateds = self._get_done()
 
-        return observation_list, reward_list, dones, truncateds, {}
+        return observation_list, reward_list, terminated, truncateds, {}
 
     def render(self):
         # TODO
@@ -342,23 +358,34 @@ class CustomEnvironment(MultiAgentEnv):
         # Initialize rewards
         reward_list = {agent.agent_id: 0 for agent in self.agents}
 
+        predator_agents = [other_agent for other_agent in self.agents if other_agent.agent_type == 1]
+
         for agent in self.agents:
             if agent.still_in_game:
                 # AGENT EATEN OR NOT
-                if agent.agent_type == 0:  # 0 for prey, 1 for predator
+                if agent.agent_type == 0:  # 0 for prey, is_prey
                     reward_list[agent.agent_id] += self.surviving_reward_for_prey
 
-                    for other_agent in self.agents:
-                        # We compare distance with predators
-                        if other_agent.agent_type == 1:
-                            dist = ComputeDistance(agent, other_agent)
-                            eating_distance = other_agent.radius + agent.radius
-                            if dist < eating_distance:
-                                # The prey is eaten
-                                reward_list[other_agent.agent_id] += self.eating_reward_for_predator
-                                reward_list[agent.agent_id] += self.death_penalty_for_prey
-                                self.num_preys -= 1
-                                agent.still_in_game = 0
+                    # Check if the agent is touching a predator
+                    for predator_agent in predator_agents:
+                        dist = ComputeDistance(predator_agent, agent)
+                        eating_distance = predator_agent.radius + agent.radius
+                        if dist < eating_distance:
+                            # The prey is eaten
+                            reward_list[predator_agent.agent_id] += self.eating_reward_for_predator
+                            reward_list[agent.agent_id] += self.death_penalty_for_prey
+                            self.num_preys -= 1
+                            agent.still_in_game = 0
+
+                            # collective penalty for preys
+                            for prey_agent in self.agents:
+                                if prey_agent.agent_type == 0 and prey_agent.still_in_game == 1:
+                                    reward_list[prey_agent.agent_id] += self.collective_death_penalty_for_prey
+
+                            # collective rewards for predators
+                            for predator_agent_2 in predator_agents:
+                                reward_list[predator_agent_2.agent_id] += self.collective_eating_reward_for_predator
+
                 else:  # is_predator
                     reward_list[agent.agent_id] += self.starving_penalty_for_predator
 
@@ -391,13 +418,11 @@ class CustomEnvironment(MultiAgentEnv):
         return reward_list
 
     def _get_done(self):
-        # True at the end
-        done_for_all = self.timestep >= self.episode_length or self.num_preys == 0
-        dones = {agent.agent_id: done_for_all for agent in self.agents}
-        # True when agent are eaten or if agent id is over the num_agent (but under the max_num_agent)
-        truncateds = {agent.agent_id: agent.still_in_game == 0 for agent in self.agents}
+        # True when a prey is eaten (agent.still_in_game == 0) or episode ends because all preys have been eaten (self.num_preys == 0)
+        terminated = {agent.agent_id: self.num_preys == 0 or agent.still_in_game == 0 for agent in self.agents}
+        terminated['__all__'] = self.num_preys == 0
+        # Premature ending because of time limit
+        truncateds = {agent.agent_id: self.timestep >= self.episode_length for agent in self.agents}
+        truncateds['__all__'] = self.timestep >= self.episode_length
 
-        dones['__all__'] = done_for_all
-        truncateds['__all__'] = done_for_all
-
-        return dones, truncateds
+        return terminated, truncateds
