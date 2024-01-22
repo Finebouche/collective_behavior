@@ -8,6 +8,7 @@ run_config = dict(
         stage_size=[20, 40],
         episode_length=500 ,
         preparation_length=120,
+        prey_consumed=False,
         # Physics
         dragging_force_coefficient=0.5,
         contact_force_coefficient=4,
@@ -32,6 +33,7 @@ run_config = dict(
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
         max_seeing_distance=20,  # Put None if not used
+        sort_by_distance=True,
         num_other_agents_observed=6,  # Put "all" if not used
         use_polar_coordinate=True,
         use_speed_observation=True,

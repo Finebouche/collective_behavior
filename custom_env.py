@@ -120,6 +120,7 @@ class CustomEnvironment(MultiAgentEnv):
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
+        self.prey_consumed = config.get('prey_consumed')
 
         # PHYSICS
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
@@ -140,29 +141,38 @@ class CustomEnvironment(MultiAgentEnv):
         })
 
         # OBSERVATION
-        self.num_other_agents_observed = config.get('num_other_agents_observed')
-        if not 0 < self.num_other_agents_observed <= self.num_agents - 1 or self.num_other_agents_observed == "all":
-            self.num_other_agents_observed = self.max_num_agents - 1
         self.max_seeing_angle = config.get('max_seeing_angle')
         if not 0 < self.max_seeing_angle <= np.pi:
             self.max_seeing_angle = np.pi
+
         self.max_seeing_distance = config.get('max_seeing_distance')
         if not 0 < self.max_seeing_distance <= self.grid_diagonal:
             self.max_seeing_distance = self.grid_diagonal
 
+        self.sort_by_distance = config.get('sort_by_distance')
+
+        self.num_other_agents_observed = config.get('num_other_agents_observed')
+        if not 0 < self.num_other_agents_observed <= self.num_agents - 1 or self.num_other_agents_observed == "all":
+            self.num_other_agents_observed = self.max_num_agents - 1
+
         self.use_polar_coordinate = config.get('use_polar_coordinate')
         self.use_speed_observation = config.get('use_speed_observation')
 
+        # OBSERVED PROPERTIES
+        # heading and position are always observed
         self.num_observed_properties = 3
+        # speed is observed when use_speed_observation is True
         if self.use_speed_observation:
             self.num_observed_properties += 2
+
         # The observation space is a dict of Box spaces, one per agent.
         # we add 1 to the number of observed properties to add the observed agent type
-        self.observation_size = (self.num_observed_properties+1) * self.num_other_agents_observed + self.num_observed_properties
+        self.observation_size = (self.num_observed_properties + 1) * self.num_other_agents_observed + self.num_observed_properties
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=-1, high=1,
-                                       shape=(self.observation_size,),
-                                       dtype=self.float_dtype) for agent in self.agents
+            agent.agent_id: spaces.Box(
+                low=-1, high=1,
+                shape=(self.observation_size,),
+                dtype=self.float_dtype) for agent in self.agents
         })
 
         # REWARDS
@@ -191,44 +201,42 @@ class CustomEnvironment(MultiAgentEnv):
         # initialize obs as an empty list of correct size
         obs = np.zeros(self.observation_size, dtype=self.float_dtype)
 
-        # Generate observation for each agent
+        # SELF OBSERVATION
+        # Distance to walls
         obs[0] = agent.loc_x / self.grid_diagonal
         obs[1] = agent.loc_y / self.grid_diagonal
         # modulo 2pi to avoid large values
-        obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
+        obs[4] = agent.heading % (2 * np.pi) / (2 * np.pi)
         # speed
         if self.use_speed_observation:
-            obs[3] = agent.speed_x / (2*self.max_acceleration)
-            obs[4] = agent.speed_y / (2*self.max_acceleration)
+            obs[3] = agent.speed_x / (2 * self.max_acceleration)
+            obs[4] = agent.speed_y / (2 * self.max_acceleration)
 
-        j = self.num_observed_properties  # start adding at this index after adding the initial properties
-
+        # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
-        other_agents = [other_agent for other_agent in self.agents if
-                        other_agent is not agent and other_agent.still_in_game == 1]
+        other_agents = [
+            other_agent for other_agent in self.agents
+            if other_agent is not agent and other_agent.still_in_game == 1
+               and abs(ComputeAngle(agent, other_agent)) < self.max_seeing_angle
+               and ComputeDistance(agent, other_agent) < self.max_seeing_distance
+        ]
+        # keep only the closest agents
+        other_agents = other_agents[:self.num_other_agents_observed]
 
         # Observation of the other agents
-        if self.num_other_agents_observed < self.num_agents:
+        if self.sort_by_distance:
             # Sort the agents by distance
             other_agents = sorted(other_agents, key=lambda other_agent: ComputeDistance(agent, other_agent))
 
-        number_of_observed_agent = 0
-
-        for other in other_agents:
-            dist = ComputeDistance(agent, other)
-            if dist < self.max_seeing_distance:
-                direction = ComputeAngle(agent, other)
-                if abs(direction) < self.max_seeing_angle:
-                    obs[j], obs[j + 1] = self._observation_pos(agent, other)                      # relative position
-                    obs[j + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
-                    if self.use_speed_observation:
-                        obs[3] = agent.speed_x / (2*self.max_acceleration)
-                        obs[4] = agent.speed_y / (2*self.max_acceleration)
-                    obs[j + self.num_observed_properties] = other.agent_type
-                    j += (self.num_observed_properties + 1)
-                number_of_observed_agent += 1
-            if number_of_observed_agent == self.num_other_agents_observed:
-                break
+        for j, other in enumerate(other_agents):
+            # count the number of already observed properties
+            base_index = (self.num_observed_properties + 1) * j + self.num_observed_properties
+            obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
+            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
+            if self.use_speed_observation:
+                obs[base_index + 3] = agent.speed_x / (2 * self.max_acceleration)
+                obs[base_index + 4] = agent.speed_y / (2 * self.max_acceleration)
+            obs[base_index + self.num_observed_properties] = other.agent_type
 
         return obs
 
@@ -336,7 +344,8 @@ class CustomEnvironment(MultiAgentEnv):
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Compute the amplitude and turn in polar coordinate
-                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (agent.radius ** 3 * self.agent_density)
+                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (
+                        agent.radius ** 3 * self.agent_density)
                 acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
 
                 # Compute the speed using projection
@@ -352,7 +361,6 @@ class CustomEnvironment(MultiAgentEnv):
                 if self.periodical_boundary is True:
                     agent.loc_x = agent.loc_x % self.stage_size
                     agent.loc_y = agent.loc_y % self.stage_size
-
 
     def _get_reward(self, action_list):
         # Initialize rewards
@@ -374,8 +382,9 @@ class CustomEnvironment(MultiAgentEnv):
                             # The prey is eaten
                             reward_list[predator_agent.agent_id] += self.eating_reward_for_predator
                             reward_list[agent.agent_id] += self.death_penalty_for_prey
-                            self.num_preys -= 1
-                            agent.still_in_game = 0
+                            if self.prey_consumed:
+                                self.num_preys -= 1
+                                agent.still_in_game = 0
 
                             # collective penalty for preys
                             for prey_agent in self.agents:
