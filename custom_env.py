@@ -129,6 +129,8 @@ class CustomEnvironment(MultiAgentEnv):
         self.periodical_boundary = config.get('periodical_boundary')
         if self.periodical_boundary is True:
             self.wall_contact_force_coefficient = None
+        self.max_speed_prey = config.get('max_speed_prey')
+        self.max_speed_predator = config.get('max_speed_predator')
 
         # ACTIONS
         self.max_acceleration = config.get('max_acceleration')
@@ -206,11 +208,16 @@ class CustomEnvironment(MultiAgentEnv):
         obs[0] = agent.loc_x / self.grid_diagonal
         obs[1] = agent.loc_y / self.grid_diagonal
         # modulo 2pi to avoid large values
-        obs[4] = agent.heading % (2 * np.pi) / (2 * np.pi)
+        obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
         # speed
         if self.use_speed_observation:
-            obs[3] = agent.speed_x / (2 * self.max_acceleration)
-            obs[4] = agent.speed_y / (2 * self.max_acceleration)
+            # add speed normalized by max speed for prey or predator
+            if agent.agent_type == 0:
+                max_speed = self.max_speed_prey
+            else:
+                max_speed = self.max_speed_predator
+            obs[3] = agent.speed_x / max_speed
+            obs[4] = agent.speed_y / max_speed
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -234,8 +241,13 @@ class CustomEnvironment(MultiAgentEnv):
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
             obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
             if self.use_speed_observation:
-                obs[base_index + 3] = agent.speed_x / (2 * self.max_acceleration)
-                obs[base_index + 4] = agent.speed_y / (2 * self.max_acceleration)
+                # add speed normalized by max speed for prey or predator
+                if other.agent_type == 0:
+                    max_speed = self.max_speed_prey
+                else:
+                    max_speed = self.max_speed_predator
+                obs[base_index + 3] = other.speed_x / max_speed
+                obs[base_index + 4] = other.speed_y / max_speed
             obs[base_index + self.num_observed_properties] = other.agent_type
 
         return obs
@@ -351,11 +363,33 @@ class CustomEnvironment(MultiAgentEnv):
                 # Compute the speed using projection
                 agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation)
                 agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation)
+                # limit the speed
+                if agent.agent_type == 0:
+                    max_speed = self.max_speed_prey
+                else:
+                    max_speed = self.max_speed_predator
+                speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+                if speed > max_speed:
+                    agent.speed_x *= max_speed / speed
+                    agent.speed_y *= max_speed / speed
 
                 # Note : agent.heading was updated right after getting the action list
                 # Update the agent's location
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
+                # limit the location to the stage size and set speed to 0 in the direction
+                if agent.loc_x < agent.radius/2:
+                    agent.loc_x = agent.radius
+                    agent.speed_x = 0
+                elif agent.loc_x > self.stage_size - agent.radius/2:
+                    agent.loc_x = self.stage_size - agent.radius
+                    agent.speed_x = 0
+                if agent.loc_y < agent.radius/2:
+                    agent.loc_y = agent.radius
+                    agent.speed_y = 0
+                elif agent.loc_y > self.stage_size - agent.radius/2:
+                    agent.loc_y = self.stage_size - agent.radius
+                    agent.speed_y = 0
 
                 # periodic boundary
                 if self.periodical_boundary is True:
