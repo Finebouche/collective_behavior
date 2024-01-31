@@ -12,6 +12,7 @@ run_config = dict(
         # Physics
         dragging_force_coefficient=2,
         contact_force_coefficient=50,
+        friction_regime="linear",            # linear, quadratic or intermediate
         periodical_boundary=False,           # If False, the wall is solid
         wall_contact_force_coefficient=3,    # Only used when periodical_boundary=False, else ignored
         prey_radius=0.1,

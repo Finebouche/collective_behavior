@@ -125,6 +125,10 @@ class CustomEnvironment(MultiAgentEnv):
         # PHYSICS
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
         self.contact_force_coefficient = config.get('contact_force_coefficient')
+        self.friction_regime = config.get('friction_regime')
+        # assert that the value is either linear, quadratic or intermediate:
+        assert self.friction_regime in ["linear", "quadratic", "intermediate"]
+
         self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
         self.periodical_boundary = config.get('periodical_boundary')
         if self.periodical_boundary is True:
@@ -260,16 +264,19 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = 0
         self.num_preys = self.ini_num_preys
 
+        # Vectorized operations for random values
+        # len(self.agents) can be bigger than self.num_agents
+        random_values = self.np_random.random(size=(len(self.agents), 3))
+        loc_x = random_values[:, 0] * self.stage_size
+        loc_y = random_values[:, 1] * self.stage_size
+        headings = random_values[:, 2] * 2 * np.pi
+
+        # Assigning the vectorized values to agents
         for i, agent in enumerate(self.agents):
-            agent.loc_x = self.np_random.random() * self.stage_size
-            agent.loc_y = self.np_random.random() * self.stage_size
-            agent.speed_x = 0.0
-            agent.speed_y = 0.0
-            agent.heading = self.np_random.random() * 2 * np.pi
-            if i < self.num_agents:
-                agent.still_in_game = 1  # True = 1 and False = 0
-            else:
-                agent.still_in_game = 0
+            agent.loc_x, agent.loc_y = loc_x[i], loc_y[i]
+            agent.speed_x, agent.speed_y = 0.0, 0.0
+            agent.heading = headings[i]
+            agent.still_in_game = int(i < self.num_agents)
 
         observation_list = self._get_observation_list()
         return observation_list, {}
@@ -301,8 +308,17 @@ class CustomEnvironment(MultiAgentEnv):
                 acceleration_y = self_force_amplitude * math.sin(agent.heading)
 
                 # DRAGGING FORCE
-                dragging_force_amplitude = math.sqrt(
-                    agent.speed_x ** 2 + agent.speed_y ** 2) ** 2 * self.dragging_force_coefficient
+                # Calculate the speed magnitude
+                speed_magnitude = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+
+                # Calculate the dragging force amplitude based on the chosen type of friction
+                if self.friction_regime == "linear":
+                    dragging_force_amplitude = speed_magnitude * self.dragging_force_coefficient
+                elif self.friction_regime == "quadratic":
+                    dragging_force_amplitude = speed_magnitude ** 2 * self.dragging_force_coefficient
+                else:
+                    dragging_force_amplitude = speed_magnitude ** 1.4 * self.dragging_force_coefficient
+
                 # opposed to the speed direction of previous step
                 dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
                 acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
