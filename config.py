@@ -31,7 +31,7 @@ run_config = dict(
         death_penalty_for_prey=-1.0,
         collective_death_penalty_for_prey=-0,
         edge_hit_penalty=-0.0001,
-        energy_cost_penalty_coef=0.001,
+        energy_cost_penalty_coef=0.00001,
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
         max_seeing_distance=20,  # Put None if not used
