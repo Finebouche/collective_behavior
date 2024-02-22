@@ -77,7 +77,6 @@ class CustomEnvironment(MultiAgentEnv):
         self.timestep = 0
         self.episode_length = config.get('episode_length')
         assert self.episode_length > 0
-        self.preparation_length = config.get('preparation_length')
 
         # random stage size
         stage_size = config.get('stage_size')
