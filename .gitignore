@@ -2,3 +2,4 @@
 .idea
 ray_results
 __pycache__
+wandb_api_key.txt
