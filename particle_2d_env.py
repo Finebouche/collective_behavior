@@ -60,7 +60,7 @@ class ParticuleAgent:
         self.still_in_game = still_in_game
 
 
-class CustomEnvironment(MultiAgentEnv):
+class Particle2dEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
 
         super().__init__()
@@ -136,12 +136,13 @@ class CustomEnvironment(MultiAgentEnv):
         self.max_speed_predator = config.get('max_speed_predator')
 
         # ACTIONS
-        self.max_acceleration = config.get('max_acceleration')
+        self.max_acceleration_prey = config.get('max_acceleration_prey')
+        self.max_acceleration_predator = config.get('max_acceleration_predator')
         self.max_turn = config.get('max_turn')
 
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(low=np.array([0, -self.max_turn]),
-                                       high=np.array([self.max_acceleration, self.max_turn]), shape=(2,),
+                                       high=np.array([self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator, self.max_turn]), shape=(2,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
 
@@ -165,14 +166,16 @@ class CustomEnvironment(MultiAgentEnv):
 
         # OBSERVED PROPERTIES
         # heading and position are always observed
-        self.num_observed_properties = 3
+        self.num_observed_properties = 4
         # speed is observed when use_speed_observation is True
         if self.use_speed_observation:
             self.num_observed_properties += 2
 
+
         # The observation space is a dict of Box spaces, one per agent.
         # we add 1 to the number of observed properties to add the observed agent type
-        self.observation_size = (self.num_observed_properties + 1) * self.num_other_agents_observed + self.num_observed_properties
+        self.observation_size = 5 + self.num_observed_properties * self.num_other_agents_observed 
+        
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
                 low=-1, high=1,
@@ -213,14 +216,15 @@ class CustomEnvironment(MultiAgentEnv):
         # modulo 2pi to avoid large values
         obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
         # speed
-        if self.use_speed_observation:
-            # add speed normalized by max speed for prey or predator
-            if agent.agent_type == 0:
-                max_speed = self.max_speed_prey
-            else:
-                max_speed = self.max_speed_predator
+        # add speed normalized by max speed for prey or predator
+        max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
+        
+        if not self.use_polar_coordinate:
             obs[3] = agent.speed_x / max_speed
             obs[4] = agent.speed_y / max_speed
+        else: 
+            obs[3] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2) / max_speed
+            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)  / (2 * np.pi)
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -240,18 +244,24 @@ class CustomEnvironment(MultiAgentEnv):
 
         for j, other in enumerate(other_agents):
             # count the number of already observed properties
-            base_index = (self.num_observed_properties + 1) * j + self.num_observed_properties
+            base_index = 5 + j * self.num_observed_properties
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
             obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
             if self.use_speed_observation:
                 # add speed normalized by max speed for prey or predator
-                if other.agent_type == 0:
-                    max_speed = self.max_speed_prey
-                else:
-                    max_speed = self.max_speed_predator
-                obs[base_index + 3] = other.speed_x / max_speed
-                obs[base_index + 4] = other.speed_y / max_speed
-            obs[base_index + self.num_observed_properties] = other.agent_type
+                max_speed = self.max_speed_prey if other.agent_type == 0 else self.max_speed_predator
+
+                if not self.use_polar_coordinate:
+                    obs[base_index + 3] = (other.speed_x - agent.speed_x) / max_speed
+                    obs[base_index + 4] = (other.speed_y - agent.speed_y) / max_speed
+                else: 
+                    obs[base_index + 3] = math.sqrt((other.speed_x - agent.speed_x)**2 + (other.speed_y - agent.speed_y)**2) / max_speed
+                    obs[base_index + 4] = math.atan2(other.speed_y - agent.speed_y,
+                                        other.speed_x - agent.speed_x
+                                       ) - agent.heading
+                                        
+    
+            obs[base_index + (self.num_observed_properties-1)] = other.agent_type
 
         return obs
 

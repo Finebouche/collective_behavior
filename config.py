@@ -21,7 +21,8 @@ run_config = dict(
         max_speed_prey=0.3,
         max_speed_predator=0.5,
         # Action
-        max_acceleration=1,
+        max_acceleration_prey=1,
+        max_acceleration_predator=2,
         max_turn=np.pi / 4,  # pi radians
         # Rewards
         # reward must be positive, penalty must be negative
@@ -39,7 +40,7 @@ run_config = dict(
         sort_by_distance=True,
         num_other_agents_observed=6,  # Put "all" if not used
         use_polar_coordinate=True,
-        use_speed_observation=True,
+        use_speed_observation=False,
         seed=None,
     ),
 )
