@@ -381,13 +381,14 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Compute the amplitude and turn in polar coordinate
-                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2) / (
-                        agent.radius ** 3 * self.agent_density)
+                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
                 acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
 
                 # Compute the speed using projection
-                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation)
-                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation)
+                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation) / (
+                        agent.radius ** 3 * self.agent_density)
+                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation) / (
+                        agent.radius ** 3 * self.agent_density)
                 # limit the speed
                 if agent.agent_type == 0:
                     max_speed = self.max_speed_prey

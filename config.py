@@ -17,7 +17,7 @@ run_config = dict(
         wall_contact_force_coefficient=3,    # Only used when periodical_boundary=False, else ignored
         prey_radius=0.1,
         predator_radius=0.2,
-        agent_density=2000,  # density of the agents to calculate the mass (should be > 1000 if radius about 0.1)
+        agent_density=1000,  # density of the agents to calculate the mass (should be > 1000 if radius about 0.1)
         max_speed_prey=0.3,
         max_speed_predator=0.5,
         # Action
