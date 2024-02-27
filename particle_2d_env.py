@@ -121,16 +121,16 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.agents = []
         for i in range(self.max_num_agents):
-            if i < self.num_preys and i < self.num_agents:
-                agent_type = 0  # for preys
-                radius = self.prey_radius
-            elif i >= self.num_preys and i < self.num_agents:
-                agent_type = 1  # for predators
-                radius = self.predator_radius
+            if i < self.num_agents:
+                if i < self.num_preys:
+                    agent_type, radius = 0, self.prey_radius  # for preys
+                else:
+                    agent_type, radius = 1, self.predator_radius  # for predators
+                still_in_game = True
             else:
-                agent_type = 0
-                radius = 0
-            self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius))
+                agent_type, radius, still_in_game = None, None, False
+
+            self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
         self.prey_consumed = config.get('prey_consumed')
@@ -303,136 +303,133 @@ class Particle2dEnvironment(MultiAgentEnv):
         # TODO
         raise NotImplementedError()
 
-    def _simulate_one_step(self, action_list=None):
-        # BUMP INTO OTHER AGENTS
-        # contact_force
-        contact_force = np.zeros((len(self.agents), 2))
-        for a, agent_a in enumerate(self.agents):
-            for b, agent_b in enumerate(self.agents):
-                if b <= a:  # Avoid double-checking and self-checking
-                    continue
+    def _simulate_one_step(self, action_dict=None):
 
-                delta_x = agent_a.loc_x - agent_b.loc_x
-                delta_y = agent_a.loc_y - agent_b.loc_y
-                dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
-                dist_min = agent_a.radius + agent_b.radius
+        # Filter agents still in the game
+        active_agents = [agent for agent in self.agents if agent.still_in_game]
 
-                if dist < dist_min:  # There's a collision
-                    k = self.contact_margin  # This should be defined in your class
-                    penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
-                    force_magnitude = self.contact_force_coefficient * penetration  # This should also be defined in your class
+        # Vectorized attributes
+        loc_x = np.array([agent.loc_x for agent in active_agents])
+        loc_y = np.array([agent.loc_y for agent in active_agents])
+        speed_x = np.array([agent.speed_x for agent in active_agents])
+        heading = np.array([agent.heading for agent in active_agents])
+        speed_y = np.array([agent.speed_y for agent in active_agents])
+        radius = np.array([agent.radius for agent in active_agents])
+        agent_types = np.array([agent.agent_type for agent in active_agents])
 
-                    if dist == 0:  # To avoid division by zero
-                        force_direction = np.random.rand(2)
-                        force_direction /= np.linalg.norm(force_direction)  # Normalize
-                    else:
-                        force_direction = np.array([delta_x, delta_y]) / dist
+        # DRAGGING FORCE
+        speed_magnitude = np.sqrt(speed_x ** 2 + speed_y ** 2)
 
-                    force = force_magnitude * force_direction
-                    contact_force[a] += force
-                    contact_force[b] -= force  # Apply equal and opposite force
+        # Calculate the dragging force amplitude based on the chosen type of friction
+        if self.friction_regime == "linear":
+            dragging_force_amplitude = speed_magnitude * self.dragging_force_coefficient
+        elif self.friction_regime == "quadratic":
+            dragging_force_amplitude = speed_magnitude ** 2 * self.dragging_force_coefficient
+        else:
+            dragging_force_amplitude = speed_magnitude ** 1.4 * self.dragging_force_coefficient
+        dragging_force_orientation = np.arctan2(speed_y, speed_x) - np.pi
+        acceleration_x = dragging_force_amplitude * np.cos(dragging_force_orientation)
+        acceleration_y = dragging_force_amplitude * np.sin(dragging_force_orientation)
 
-        for agent in self.agents:
-            if agent.still_in_game == 1:
-                # DRAGGING FORCE
-                # Calculate the speed magnitude
-                speed_magnitude = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+        # ACCELERATION FORCE
+        if action_dict is not None:
+            # put action dictionary in a list
+            actions = [action_dict.get(agent.agent_id, (0, 0)) for agent in self.agents  if agent.still_in_game]
+            self_force_amplitude, self_force_orientation = zip(*actions)
+            heading = (heading + self_force_orientation) % (2 * np.pi)
+            acceleration_x += self_force_amplitude * np.cos(heading)
+            acceleration_y += self_force_amplitude * np.sin(heading)
 
-                # Calculate the dragging force amplitude based on the chosen type of friction
-                if self.friction_regime == "linear":
-                    dragging_force_amplitude = speed_magnitude * self.dragging_force_coefficient
-                elif self.friction_regime == "quadratic":
-                    dragging_force_amplitude = speed_magnitude ** 2 * self.dragging_force_coefficient
-                else:
-                    dragging_force_amplitude = speed_magnitude ** 1.4 * self.dragging_force_coefficient
+        # CONTACT FORCES WITH AGENTS
+        # Calculate distances between agents
+        delta_x = loc_x[:, np.newaxis] - loc_x
+        delta_y = loc_y[:, np.newaxis] - loc_y
+        distances = np.sqrt(delta_x ** 2 + delta_y ** 2)
 
-                # opposed to the speed direction of previous step
-                dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
-                acceleration_x = dragging_force_amplitude * math.cos(dragging_force_orientation)
-                acceleration_y = dragging_force_amplitude * math.sin(dragging_force_orientation)
+        # Calculate minimum distances for collision (matrix of sum of radii)
+        dist_min_matrix = radius[:, np.newaxis] + radius
 
-                # ACCELERATION FORCE
-                if action_list is not None:
-                    # get the actions for this agent
-                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
-                    agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
-                    acceleration_x += self_force_amplitude * math.cos(agent.heading)
-                    acceleration_y += self_force_amplitude * math.sin(agent.heading)
+        # Identify collisions (where distance < sum of radii)
+        collisions = distances < dist_min_matrix
 
-                # CONTACT FORCE
-                acceleration_x += contact_force[agent.agent_id][0]
-                acceleration_y += contact_force[agent.agent_id][1]
+        # Calculate penetration (use np.logaddexp for numerical stability)
+        penetration = np.logaddexp(0, -(distances - dist_min_matrix) / self.contact_margin) * self.contact_margin
+        force_magnitude = self.contact_force_coefficient * penetration
+        force_direction_x = np.where(distances != 0, delta_x / (distances + self.eps), 0)
+        force_direction_y = np.where(distances != 0, delta_y / (distances + self.eps), 0)
 
-                # WALL BOUNCING
-                # Check if the agent is touching the edge
-                if self.periodical_boundary is False:
-                    is_touching_edge_x = (
-                            agent.loc_x < agent.radius
-                            or agent.loc_x > self.stage_size - agent.radius
-                    )
-                    is_touching_edge_y = (
-                            agent.loc_y < agent.radius
-                            or agent.loc_y > self.stage_size - agent.radius
-                    )
+        # Calculate forces for each possible collision (N x N)
+        force_x = np.zeros_like(collisions, dtype=np.float64)  # Specify dtype as np.float64 otherwise it will be bool
+        force_y = np.zeros_like(collisions, dtype=np.float64)
+        force_x[collisions] += force_magnitude[collisions] * force_direction_x[collisions]
+        force_y[collisions] += force_magnitude[collisions] * force_direction_y[collisions]
+        contact_force = np.stack((np.sum(force_x, axis=1), np.sum(force_y, axis=1)), axis=-1)
+        acceleration_x += contact_force[:, 0]
+        acceleration_y += contact_force[:, 1]
 
-                    if is_touching_edge_x and self.wall_contact_force_coefficient > 0:
-                        # you can rarely have contact with two walls at the same time
-                        contact_force_amplitude_x = self.wall_contact_force_coefficient * (
-                            agent.radius - agent.loc_x if agent.loc_x < agent.radius
-                            else agent.loc_x - self.stage_size + agent.radius
-                        )
-                        acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
+        # CONTACT FORCES WITH WALLS
+        touching_edge_x = np.logical_or(loc_x < radius, loc_x > self.stage_size - radius)
+        touching_edge_y = np.logical_or(loc_y < radius, loc_y > self.stage_size - radius)
 
-                    if is_touching_edge_y and self.wall_contact_force_coefficient > 0:
-                        contact_force_amplitude_y = self.wall_contact_force_coefficient * (
-                            agent.radius - agent.loc_y if agent.loc_y < agent.radius
-                            else agent.loc_y - self.stage_size + agent.radius
-                        )
+        contact_force_x = np.zeros_like(loc_x)
+        contact_force_y = np.zeros_like(loc_y)
 
-                        acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
+        # Compute contact force for x dimension
+        x_less_than_radius = loc_x < radius
+        force_x_left = radius - loc_x  # Force when touching on the left
+        force_x_right = loc_x - self.stage_size + radius  # Force when touching on the right
+        # Apply element-wise conditional logic
+        contact_force_x[touching_edge_x] = self.wall_contact_force_coefficient * np.where(
+            x_less_than_radius[touching_edge_x], force_x_left[touching_edge_x], force_x_right[touching_edge_x]
+        )
 
-                # # UPDATE ACCELERATION/SPEED/POSITION
-                # Compute the amplitude and turn in polar coordinate
-                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
-                acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
+        # Compute contact force for y dimension
+        y_less_than_radius = loc_y < radius
+        force_y_bottom = radius - loc_y  # Force when touching at the bottom
+        force_y_top = loc_y - self.stage_size + radius  # Force when touching at the top
+        # Apply element-wise conditional logic
+        contact_force_y[touching_edge_y] = self.wall_contact_force_coefficient * np.where(
+            y_less_than_radius[touching_edge_y], force_y_bottom[touching_edge_y], force_y_top[touching_edge_y]
+        )
 
-                # Compute the speed using projection
-                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation) / (
-                        agent.radius ** 3 * self.agent_density)
-                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation) / (
-                        agent.radius ** 3 * self.agent_density)
-                # limit the speed
-                if agent.agent_type == 0:
-                    max_speed = self.max_speed_prey
-                else:
-                    max_speed = self.max_speed_predator
-                speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
-                if speed > max_speed:
-                    agent.speed_x *= max_speed / speed
-                    agent.speed_y *= max_speed / speed
+        # Update acceleration with contact forces
+        acceleration_x += np.sign(self.stage_size / 2 - loc_x) * contact_force_x
+        acceleration_y += np.sign(self.stage_size / 2 - loc_y) * contact_force_y
 
-                # Note : agent.heading was updated right after getting the action list
-                # Update the agent's location
-                agent.loc_x += agent.speed_x
-                agent.loc_y += agent.speed_y
-                # limit the location to the stage size and set speed to 0 in the direction
-                if agent.loc_x < agent.radius / 2:
-                    agent.loc_x = agent.radius
-                    agent.speed_x = 0
-                elif agent.loc_x > self.stage_size - agent.radius / 2:
-                    agent.loc_x = self.stage_size - agent.radius
-                    agent.speed_x = 0
-                if agent.loc_y < agent.radius / 2:
-                    agent.loc_y = agent.radius
-                    agent.speed_y = 0
-                elif agent.loc_y > self.stage_size - agent.radius / 2:
-                    agent.loc_y = self.stage_size - agent.radius
-                    agent.speed_y = 0
+        # Compute new speeds
+        speed_x += acceleration_x / (radius ** 3 * self.agent_density)
+        speed_y += acceleration_y / (radius ** 3 * self.agent_density)
+        speed_magnitude = np.sqrt(speed_x ** 2 + speed_y ** 2)
+        max_speeds = np.where(agent_types == 0, self.max_speed_prey, self.max_speed_predator)
+        over_limit = speed_magnitude > max_speeds
+        speed_x[over_limit] *= max_speeds[over_limit] / speed_magnitude[over_limit]
+        speed_y[over_limit] *= max_speeds[over_limit] / speed_magnitude[over_limit]
 
-                # periodic boundary
-                if self.periodical_boundary is True:
-                    agent.loc_x = agent.loc_x % self.stage_size
-                    agent.loc_y = agent.loc_y % self.stage_size
+        # Update positions
+        loc_x += speed_x
+        loc_y += speed_y
+
+        # Handle periodic boundaries
+        if self.periodical_boundary:
+            loc_x %= self.stage_size
+            loc_y %= self.stage_size
+        else:
+            # Ensure agents do not go out of bounds and adjust speed to 0 if they hit the boundaries
+            out_of_bounds_x = np.logical_or(loc_x < radius / 2, loc_x > self.stage_size - radius / 2)
+            out_of_bounds_y = np.logical_or(loc_y < radius / 2, loc_y > self.stage_size - radius / 2)
+
+            loc_x[out_of_bounds_x] = np.clip(loc_x[out_of_bounds_x], radius[out_of_bounds_x], self.stage_size - radius[out_of_bounds_x])
+            speed_x[out_of_bounds_x] = 0
+            loc_y[out_of_bounds_y] = np.clip(loc_y[out_of_bounds_y], radius[out_of_bounds_y], self.stage_size - radius[out_of_bounds_y])
+            speed_y[out_of_bounds_y] = 0
+
+        # UPDATE THE STATES OF ACTIVE AGENTS
+        for i, agent in enumerate(active_agents):
+            agent.loc_x = loc_x[i]
+            agent.loc_y = loc_y[i]
+            agent.speed_x = speed_x[i]
+            agent.speed_y = speed_y[i]
+            agent.heading = heading[i]
 
     def _get_reward(self, action_list):
         # Initialize rewards
