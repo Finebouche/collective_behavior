@@ -4,7 +4,7 @@ run_config = dict(
     # Environment settings
     env=dict(
         # Computational
-        use_vectorized=False,
+        use_vectorized=False,   # mostly useless for low number of fish
         temporal_increment = 1, # default should be 1
         # General
         num_preys=[10, 20],
@@ -14,7 +14,7 @@ run_config = dict(
         prey_consumed=False,
         # Physics
         dragging_force_coefficient=2,
-        contact_force_coefficient=50,
+        contact_force_coefficient=25,
         contact_margin=0.5,
         friction_regime="linear",            # linear, quadratic or intermediate
         periodical_boundary=False,           # If False, the wall is solid
@@ -37,7 +37,7 @@ run_config = dict(
         death_penalty_for_prey=-1.0,
         collective_death_penalty_for_prey=-0,
         edge_hit_penalty=-0.0001,
-        energy_cost_penalty_coef=0.00001,
+        energy_cost_penalty_coef=0.00001, # positive (this is for a ratio)
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
         max_seeing_distance=20,  # Put None if not used
