@@ -6,7 +6,7 @@ run_config = dict(
         num_preys=[10, 20],
         num_predators=[2, 4],
         stage_size=25,
-        episode_length=500 ,
+        episode_length=500,
         #preparation_length=120,
         prey_consumed=False,
         # Physics
