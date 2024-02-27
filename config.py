@@ -3,11 +3,13 @@ import numpy as np
 run_config = dict(
     # Environment settings
     env=dict(
+        # Computational
+        use_vectorized=False,
+        # General
         num_preys=[10, 20],
         num_predators=[2, 4],
         stage_size=25,
         episode_length=500,
-        #preparation_length=120,
         prey_consumed=False,
         # Physics
         dragging_force_coefficient=2,

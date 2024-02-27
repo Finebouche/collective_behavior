@@ -73,6 +73,8 @@ class Particle2dEnvironment(MultiAgentEnv):
         if seed is not None:
             self.np_random, seed = seeding.np_random(seed)
 
+        self.use_vectorized = config.get('use_vectorized')
+
         # ENVIRONMENT
         self.timestep = 0
         self.episode_length = config.get('episode_length')
@@ -129,7 +131,6 @@ class Particle2dEnvironment(MultiAgentEnv):
                 still_in_game = True
             else:
                 agent_type, radius, still_in_game = None, None, False
-
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
@@ -290,7 +291,10 @@ class Particle2dEnvironment(MultiAgentEnv):
     def step(self, action_list):
         self.timestep += 1
 
-        self._simulate_one_step(action_list)
+        if self.use_vectorized:
+            self._simulate_one_vectorized_step(action_list)
+        else:
+            self._simulate_one_step(action_list)
 
         observation_list = self._get_observation_list()
 
@@ -303,7 +307,139 @@ class Particle2dEnvironment(MultiAgentEnv):
         # TODO
         raise NotImplementedError()
 
-    def _simulate_one_step(self, action_dict=None):
+    def _simulate_one_step(self, action_list=None):
+        # BUMP INTO OTHER AGENTS
+        # contact_force
+        contact_force = np.zeros((len(self.agents), 2))
+        for a, agent_a in enumerate(self.agents):
+            for b, agent_b in enumerate(self.agents):
+                if b <= a:  # Avoid double-checking and self-checking
+                    continue
+
+                delta_x = agent_a.loc_x - agent_b.loc_x
+                delta_y = agent_a.loc_y - agent_b.loc_y
+                dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
+                dist_min = agent_a.radius + agent_b.radius
+
+                if dist < dist_min:  # There's a collision
+                    k = self.contact_margin  # This should be defined in your class
+                    penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
+                    force_magnitude = self.contact_force_coefficient * penetration  # This should also be defined in your class
+
+                    if dist == 0:  # To avoid division by zero
+                        force_direction = np.random.rand(2)
+                        force_direction /= np.linalg.norm(force_direction)  # Normalize
+                    else:
+                        force_direction = np.array([delta_x, delta_y]) / dist
+
+                    force = force_magnitude * force_direction
+                    contact_force[a] += force
+                    contact_force[b] -= force  # Apply equal and opposite force
+
+        for agent in self.agents:
+            if agent.still_in_game == 1:
+                # DRAGGING FORCE
+                # Calculate the speed magnitude
+                speed_magnitude = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+
+                # Calculate the dragging force amplitude based on the chosen type of friction
+                if self.friction_regime == "linear":
+                    dragging_force_amplitude = speed_magnitude * self.dragging_force_coefficient
+                elif self.friction_regime == "quadratic":
+                    dragging_force_amplitude = speed_magnitude ** 2 * self.dragging_force_coefficient
+                else:
+                    dragging_force_amplitude = speed_magnitude ** 1.4 * self.dragging_force_coefficient
+
+                # opposed to the speed direction of previous step
+                dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
+                acceleration_x = dragging_force_amplitude * math.cos(dragging_force_orientation)
+                acceleration_y = dragging_force_amplitude * math.sin(dragging_force_orientation)
+
+                # ACCELERATION FORCE
+                if action_list is not None:
+                    # get the actions for this agent
+                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                    agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
+                    acceleration_x += self_force_amplitude * math.cos(agent.heading)
+                    acceleration_y += self_force_amplitude * math.sin(agent.heading)
+
+                # CONTACT FORCE
+                acceleration_x += contact_force[agent.agent_id][0]
+                acceleration_y += contact_force[agent.agent_id][1]
+
+                # WALL BOUNCING
+                # Check if the agent is touching the edge
+                if self.periodical_boundary is False:
+                    is_touching_edge_x = (
+                            agent.loc_x < agent.radius
+                            or agent.loc_x > self.stage_size - agent.radius
+                    )
+                    is_touching_edge_y = (
+                            agent.loc_y < agent.radius
+                            or agent.loc_y > self.stage_size - agent.radius
+                    )
+
+                    if is_touching_edge_x and self.wall_contact_force_coefficient > 0:
+                        # you can rarely have contact with two walls at the same time
+                        contact_force_amplitude_x = self.wall_contact_force_coefficient * (
+                            agent.radius - agent.loc_x if agent.loc_x < agent.radius
+                            else agent.loc_x - self.stage_size + agent.radius
+                        )
+                        acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
+
+                    if is_touching_edge_y and self.wall_contact_force_coefficient > 0:
+                        contact_force_amplitude_y = self.wall_contact_force_coefficient * (
+                            agent.radius - agent.loc_y if agent.loc_y < agent.radius
+                            else agent.loc_y - self.stage_size + agent.radius
+                        )
+
+                        acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
+
+                # # UPDATE ACCELERATION/SPEED/POSITION
+                # Compute the amplitude and turn in polar coordinate
+                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
+                acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
+
+                # Compute the speed using projection
+                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation) / (
+                        agent.radius ** 3 * self.agent_density)
+                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation) / (
+                        agent.radius ** 3 * self.agent_density)
+                # limit the speed
+                if agent.agent_type == 0:
+                    max_speed = self.max_speed_prey
+                else:
+                    max_speed = self.max_speed_predator
+                speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+                if speed > max_speed:
+                    agent.speed_x *= max_speed / speed
+                    agent.speed_y *= max_speed / speed
+
+                # Note : agent.heading was updated right after getting the action list
+                # Update the agent's location
+                agent.loc_x += agent.speed_x
+                agent.loc_y += agent.speed_y
+                # limit the location to the stage size and set speed to 0 in the direction
+                if agent.loc_x < agent.radius / 2:
+                    agent.loc_x = agent.radius
+                    agent.speed_x = 0
+                elif agent.loc_x > self.stage_size - agent.radius / 2:
+                    agent.loc_x = self.stage_size - agent.radius
+                    agent.speed_x = 0
+                if agent.loc_y < agent.radius / 2:
+                    agent.loc_y = agent.radius
+                    agent.speed_y = 0
+                elif agent.loc_y > self.stage_size - agent.radius / 2:
+                    agent.loc_y = self.stage_size - agent.radius
+                    agent.speed_y = 0
+
+                # periodic boundary
+                if self.periodical_boundary is True:
+                    agent.loc_x = agent.loc_x % self.stage_size
+                    agent.loc_y = agent.loc_y % self.stage_size
+
+
+    def _simulate_one_vectorized_step(self, action_dict=None):
 
         # Filter agents still in the game
         active_agents = [agent for agent in self.agents if agent.still_in_game]
