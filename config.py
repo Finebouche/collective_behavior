@@ -5,6 +5,7 @@ run_config = dict(
     env=dict(
         # Computational
         use_vectorized=False,
+        temporal_increment = 1, # default should be 1
         # General
         num_preys=[10, 20],
         num_predators=[2, 4],

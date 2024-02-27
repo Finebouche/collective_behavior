@@ -74,6 +74,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             self.np_random, seed = seeding.np_random(seed)
 
         self.use_vectorized = config.get('use_vectorized')
+        self.dt = config.get('temporal_increment')
 
         # ENVIRONMENT
         self.timestep = 0
@@ -291,11 +292,22 @@ class Particle2dEnvironment(MultiAgentEnv):
     def step(self, action_list):
         self.timestep += 1
 
+        total_steps = int(round(1 / self.dt))
+        
+        # Apply action only once at the beginning
         if self.use_vectorized:
             self._simulate_one_vectorized_step(action_list)
         else:
-            self._simulate_one_step(action_list)
-
+            self._simulate_one_step(self.dt, action_list)  # Assuming the correct signature without self.dt
+        
+        # Continue simulation without actions
+        for i in range(total_steps - 1):  # -1 because we already simulated the first step
+            if self.use_vectorized:
+                self._simulate_one_vectorized_step(None)
+            else:
+                self._simulate_one_step(self.dt, None)  # Assuming the correct signature without self.dt
+        
+                
         observation_list = self._get_observation_list()
 
         reward_list = self._get_reward(action_list)
@@ -307,13 +319,15 @@ class Particle2dEnvironment(MultiAgentEnv):
         # TODO
         raise NotImplementedError()
 
-    def _simulate_one_step(self, action_list=None):
+    def _simulate_one_step(self, dt, action_dict=None):
+
         # BUMP INTO OTHER AGENTS
-        # contact_force
-        contact_force = np.zeros((len(self.agents), 2))
+        contact_force_dict = {agent.agent_id: np.array([0, 0], dtype=np.float64) for agent in self.agents}
         for a, agent_a in enumerate(self.agents):
             for b, agent_b in enumerate(self.agents):
                 if b <= a:  # Avoid double-checking and self-checking
+                    continue
+                if not agent_a.still_in_game or not agent_b.still_in_game:
                     continue
 
                 delta_x = agent_a.loc_x - agent_b.loc_x
@@ -333,8 +347,8 @@ class Particle2dEnvironment(MultiAgentEnv):
                         force_direction = np.array([delta_x, delta_y]) / dist
 
                     force = force_magnitude * force_direction
-                    contact_force[a] += force
-                    contact_force[b] -= force  # Apply equal and opposite force
+                    contact_force_dict[agent_a.agent_id] += force
+                    contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
 
         for agent in self.agents:
             if agent.still_in_game == 1:
@@ -356,30 +370,22 @@ class Particle2dEnvironment(MultiAgentEnv):
                 acceleration_y = dragging_force_amplitude * math.sin(dragging_force_orientation)
 
                 # ACCELERATION FORCE
-                if action_list is not None:
+                if action_dict is not None:
                     # get the actions for this agent
-                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                    self_force_amplitude, self_force_orientation = action_dict.get(agent.agent_id)
                     agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
                     acceleration_x += self_force_amplitude * math.cos(agent.heading)
                     acceleration_y += self_force_amplitude * math.sin(agent.heading)
 
                 # CONTACT FORCE
-                acceleration_x += contact_force[agent.agent_id][0]
-                acceleration_y += contact_force[agent.agent_id][1]
+                contact_force = contact_force_dict.get(agent.agent_id)
+                acceleration_x += contact_force[0]
+                acceleration_y += contact_force[1]
 
                 # WALL BOUNCING
                 # Check if the agent is touching the edge
-                if self.periodical_boundary is False:
-                    is_touching_edge_x = (
-                            agent.loc_x < agent.radius
-                            or agent.loc_x > self.stage_size - agent.radius
-                    )
-                    is_touching_edge_y = (
-                            agent.loc_y < agent.radius
-                            or agent.loc_y > self.stage_size - agent.radius
-                    )
-
-                    if is_touching_edge_x and self.wall_contact_force_coefficient > 0:
+                if self.periodical_boundary is False and self.wall_contact_force_coefficient > 0:
+                    if agent.loc_x < agent.radius or agent.loc_x > self.stage_size - agent.radius:
                         # you can rarely have contact with two walls at the same time
                         contact_force_amplitude_x = self.wall_contact_force_coefficient * (
                             agent.radius - agent.loc_x if agent.loc_x < agent.radius
@@ -387,38 +393,30 @@ class Particle2dEnvironment(MultiAgentEnv):
                         )
                         acceleration_x += sign(self.stage_size / 2 - agent.loc_x) * contact_force_amplitude_x
 
-                    if is_touching_edge_y and self.wall_contact_force_coefficient > 0:
+                    if agent.loc_y < agent.radius or agent.loc_y > self.stage_size - agent.radius:
                         contact_force_amplitude_y = self.wall_contact_force_coefficient * (
                             agent.radius - agent.loc_y if agent.loc_y < agent.radius
                             else agent.loc_y - self.stage_size + agent.radius
                         )
-
                         acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
-                # Compute the amplitude and turn in polar coordinate
-                acceleration_amplitude = math.sqrt(acceleration_x ** 2 + acceleration_y ** 2)
-                acceleration_orientation = math.atan2(acceleration_y, acceleration_x)
+                # Update speed using acceleration
+                agent.speed_x += acceleration_x / (agent.radius ** 3 * self.agent_density) * dt
+                agent.speed_y += acceleration_y / (agent.radius ** 3 * self.agent_density) * dt
 
-                # Compute the speed using projection
-                agent.speed_x += acceleration_amplitude * math.cos(acceleration_orientation) / (
-                        agent.radius ** 3 * self.agent_density)
-                agent.speed_y += acceleration_amplitude * math.sin(acceleration_orientation) / (
-                        agent.radius ** 3 * self.agent_density)
                 # limit the speed
-                if agent.agent_type == 0:
-                    max_speed = self.max_speed_prey
-                else:
-                    max_speed = self.max_speed_predator
-                speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
-                if speed > max_speed:
-                    agent.speed_x *= max_speed / speed
-                    agent.speed_y *= max_speed / speed
+                max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
+                current_speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+                if current_speed > max_speed:
+                    agent.speed_x *= max_speed / current_speed
+                    agent.speed_y *= max_speed / current_speed
 
                 # Note : agent.heading was updated right after getting the action list
                 # Update the agent's location
-                agent.loc_x += agent.speed_x
-                agent.loc_y += agent.speed_y
+                agent.loc_x += agent.speed_x * dt
+                agent.loc_y += agent.speed_y * dt
+                
                 # limit the location to the stage size and set speed to 0 in the direction
                 if agent.loc_x < agent.radius / 2:
                     agent.loc_x = agent.radius
@@ -434,12 +432,13 @@ class Particle2dEnvironment(MultiAgentEnv):
                     agent.speed_y = 0
 
                 # periodic boundary
-                if self.periodical_boundary is True:
+                if self.periodical_boundary:
                     agent.loc_x = agent.loc_x % self.stage_size
                     agent.loc_y = agent.loc_y % self.stage_size
 
 
     def _simulate_one_vectorized_step(self, action_dict=None):
+        # Not worth it for small number of agents ! Might not be up to date ! 
 
         # Filter agents still in the game
         active_agents = [agent for agent in self.agents if agent.still_in_game]
