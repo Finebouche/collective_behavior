@@ -77,14 +77,28 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.timestep = 0
         self.episode_length = config.get('episode_length')
         assert self.episode_length > 0
-
-        # random stage size
+        # stage size in an interval or a fixed value
         stage_size = config.get('stage_size')
         self.stage_size, _ = random_int_in_interval(stage_size)
         assert self.stage_size > 1
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
-        # AGENTS
+        # PHYSICS
+        self.dragging_force_coefficient = config.get('dragging_force_coefficient')
+        self.contact_force_coefficient = config.get('contact_force_coefficient')
+        self.contact_margin = config.get('contact_margin')
+        self.friction_regime = config.get('friction_regime')
+        # assert that the value is either linear, quadratic or intermediate:
+        assert self.friction_regime in ["linear", "quadratic", "intermediate"]
+
+        self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
+        self.periodical_boundary = config.get('periodical_boundary')
+        if self.periodical_boundary is True:
+            self.wall_contact_force_coefficient = None
+        self.max_speed_prey = config.get('max_speed_prey')
+        self.max_speed_predator = config.get('max_speed_predator')
+
+        # AGENTS (PREYS AND PREDATORS)
         # random number of preys
         ini_num_preys = config.get('num_preys')
         self.ini_num_preys, self.max_num_preys = random_int_in_interval(ini_num_preys)
@@ -121,32 +135,20 @@ class Particle2dEnvironment(MultiAgentEnv):
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
         self.prey_consumed = config.get('prey_consumed')
 
-        # PHYSICS
-        self.dragging_force_coefficient = config.get('dragging_force_coefficient')
-        self.contact_force_coefficient = config.get('contact_force_coefficient')
-        self.friction_regime = config.get('friction_regime')
-        # assert that the value is either linear, quadratic or intermediate:
-        assert self.friction_regime in ["linear", "quadratic", "intermediate"]
-
-        self.wall_contact_force_coefficient = config.get('wall_contact_force_coefficient')
-        self.periodical_boundary = config.get('periodical_boundary')
-        if self.periodical_boundary is True:
-            self.wall_contact_force_coefficient = None
-        self.max_speed_prey = config.get('max_speed_prey')
-        self.max_speed_predator = config.get('max_speed_predator')
-
-        # ACTIONS
+        # ACTIONS (ACCELERATION AND TURN)
         self.max_acceleration_prey = config.get('max_acceleration_prey')
         self.max_acceleration_predator = config.get('max_acceleration_predator')
         self.max_turn = config.get('max_turn')
 
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(low=np.array([0, -self.max_turn]),
-                                       high=np.array([self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator, self.max_turn]), shape=(2,),
+                                       high=np.array([
+                                           self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator,
+                                           self.max_turn]), shape=(2,),
                                        dtype=self.float_dtype) for agent in self.agents
         })
 
-        # OBSERVATION
+        # OBSERVATION SETTINGS
         self.max_seeing_angle = config.get('max_seeing_angle')
         if not 0 < self.max_seeing_angle <= np.pi:
             self.max_seeing_angle = np.pi
@@ -164,18 +166,12 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.use_polar_coordinate = config.get('use_polar_coordinate')
         self.use_speed_observation = config.get('use_speed_observation')
 
-        # OBSERVED PROPERTIES
-        # heading and position are always observed
-        self.num_observed_properties = 4
-        # speed is observed when use_speed_observation is True
-        if self.use_speed_observation:
+        # Number of observed properties
+        self.num_observed_properties = 4  # heading, position and type are always observed
+        if self.use_speed_observation:  # speed is observed when use_speed_observation is True
             self.num_observed_properties += 2
+        self.observation_size = 5 + self.num_observed_properties * self.num_other_agents_observed
 
-
-        # The observation space is a dict of Box spaces, one per agent.
-        # we add 1 to the number of observed properties to add the observed agent type
-        self.observation_size = 5 + self.num_observed_properties * self.num_other_agents_observed 
-        
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
                 low=-1, high=1,
@@ -218,13 +214,13 @@ class Particle2dEnvironment(MultiAgentEnv):
         # speed
         # add speed normalized by max speed for prey or predator
         max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
-        
+
         if not self.use_polar_coordinate:
             obs[3] = agent.speed_x / max_speed
             obs[4] = agent.speed_y / max_speed
-        else: 
+        else:
             obs[3] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2) / max_speed
-            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)  / (2 * np.pi)
+            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi) / (2 * np.pi)
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -254,14 +250,15 @@ class Particle2dEnvironment(MultiAgentEnv):
                 if not self.use_polar_coordinate:
                     obs[base_index + 3] = (other.speed_x - agent.speed_x) / max_speed
                     obs[base_index + 4] = (other.speed_y - agent.speed_y) / max_speed
-                else: 
-                    obs[base_index + 3] = math.sqrt((other.speed_x - agent.speed_x)**2 + (other.speed_y - agent.speed_y)**2) / max_speed
+                else:
+                    obs[base_index + 3] = math.sqrt(
+                        (other.speed_x - agent.speed_x) ** 2 + (other.speed_y - agent.speed_y) ** 2
+                    ) / max_speed
                     obs[base_index + 4] = math.atan2(other.speed_y - agent.speed_y,
-                                        other.speed_x - agent.speed_x
-                                       ) - agent.heading
-                                        
-    
-            obs[base_index + (self.num_observed_properties-1)] = other.agent_type
+                                                     other.speed_x - agent.speed_x
+                                                     ) - agent.heading
+
+            obs[base_index + (self.num_observed_properties - 1)] = other.agent_type
 
         return obs
 
@@ -298,24 +295,45 @@ class Particle2dEnvironment(MultiAgentEnv):
         observation_list = self._get_observation_list()
 
         reward_list = self._get_reward(action_list)
-        terminated, truncateds = self._get_done()
+        terminated, truncated = self._get_done()
 
-        return observation_list, reward_list, terminated, truncateds, {}
+        return observation_list, reward_list, terminated, truncated, {}
 
     def render(self):
         # TODO
         raise NotImplementedError()
 
-    def _simulate_one_step(self, action_list):
+    def _simulate_one_step(self, action_list=None):
+        # BUMP INTO OTHER AGENTS
+        # contact_force
+        contact_force = np.zeros((len(self.agents), 2))
+        for a, agent_a in enumerate(self.agents):
+            for b, agent_b in enumerate(self.agents):
+                if b <= a:  # Avoid double-checking and self-checking
+                    continue
+
+                delta_x = agent_a.loc_x - agent_b.loc_x
+                delta_y = agent_a.loc_y - agent_b.loc_y
+                dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
+                dist_min = agent_a.radius + agent_b.radius
+
+                if dist < dist_min:  # There's a collision
+                    k = self.contact_margin  # This should be defined in your class
+                    penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
+                    force_magnitude = self.contact_force_coefficient * penetration  # This should also be defined in your class
+
+                    if dist == 0:  # To avoid division by zero
+                        force_direction = np.random.rand(2)
+                        force_direction /= np.linalg.norm(force_direction)  # Normalize
+                    else:
+                        force_direction = np.array([delta_x, delta_y]) / dist
+
+                    force = force_magnitude * force_direction
+                    contact_force[a] += force
+                    contact_force[b] -= force  # Apply equal and opposite force
+
         for agent in self.agents:
             if agent.still_in_game == 1:
-                # get the actions for this agent
-                self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
-
-                agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
-                acceleration_x = self_force_amplitude * math.cos(agent.heading)
-                acceleration_y = self_force_amplitude * math.sin(agent.heading)
-
                 # DRAGGING FORCE
                 # Calculate the speed magnitude
                 speed_magnitude = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
@@ -330,26 +348,20 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # opposed to the speed direction of previous step
                 dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
-                acceleration_x += dragging_force_amplitude * math.cos(dragging_force_orientation)
-                acceleration_y += dragging_force_amplitude * math.sin(dragging_force_orientation)
+                acceleration_x = dragging_force_amplitude * math.cos(dragging_force_orientation)
+                acceleration_y = dragging_force_amplitude * math.sin(dragging_force_orientation)
 
-                # BUMP INTO OTHER AGENTS
-                # contact_force
-                if self.contact_force_coefficient > 0:
-                    for other_agent in self.agents:
-                        if agent.agent_type == other_agent.agent_type and agent.agent_id != other_agent.agent_id:
-                            dist = ComputeDistance(agent, other_agent)
-                            if dist < other_agent.radius + agent.radius:
-                                # compute the contact force
-                                contact_force_amplitude = self.contact_force_coefficient * (
-                                        other_agent.radius + agent.radius - dist)
-                                contact_force_orientation = math.atan2(
-                                    other_agent.loc_y - agent.loc_y,
-                                    other_agent.loc_x - agent.loc_x
-                                ) - math.pi  # opposed to the contact direction
+                # ACCELERATION FORCE
+                if action_list is not None:
+                    # get the actions for this agent
+                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                    agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
+                    acceleration_x += self_force_amplitude * math.cos(agent.heading)
+                    acceleration_y += self_force_amplitude * math.sin(agent.heading)
 
-                                acceleration_x += contact_force_amplitude * math.cos(contact_force_orientation)
-                                acceleration_y += contact_force_amplitude * math.sin(contact_force_orientation)
+                # CONTACT FORCE
+                acceleration_x += contact_force[agent.agent_id][0]
+                acceleration_y += contact_force[agent.agent_id][1]
 
                 # WALL BOUNCING
                 # Check if the agent is touching the edge
@@ -404,16 +416,16 @@ class Particle2dEnvironment(MultiAgentEnv):
                 agent.loc_x += agent.speed_x
                 agent.loc_y += agent.speed_y
                 # limit the location to the stage size and set speed to 0 in the direction
-                if agent.loc_x < agent.radius/2:
+                if agent.loc_x < agent.radius / 2:
                     agent.loc_x = agent.radius
                     agent.speed_x = 0
-                elif agent.loc_x > self.stage_size - agent.radius/2:
+                elif agent.loc_x > self.stage_size - agent.radius / 2:
                     agent.loc_x = self.stage_size - agent.radius
                     agent.speed_x = 0
-                if agent.loc_y < agent.radius/2:
+                if agent.loc_y < agent.radius / 2:
                     agent.loc_y = agent.radius
                     agent.speed_y = 0
-                elif agent.loc_y > self.stage_size - agent.radius/2:
+                elif agent.loc_y > self.stage_size - agent.radius / 2:
                     agent.loc_y = self.stage_size - agent.radius
                     agent.speed_y = 0
 
@@ -487,11 +499,12 @@ class Particle2dEnvironment(MultiAgentEnv):
         return reward_list
 
     def _get_done(self):
+        # Natural ending
         # True when a prey is eaten (agent.still_in_game == 0) or episode ends because all preys have been eaten (self.num_preys == 0)
         terminated = {agent.agent_id: self.num_preys == 0 or agent.still_in_game == 0 for agent in self.agents}
         terminated['__all__'] = self.num_preys == 0
-        # Premature ending because of time limit
-        truncateds = {agent.agent_id: self.timestep >= self.episode_length for agent in self.agents}
-        truncateds['__all__'] = self.timestep >= self.episode_length
+        # Premature ending (because of time limit)
+        truncated = {agent.agent_id: self.timestep >= self.episode_length for agent in self.agents}
+        truncated['__all__'] = self.timestep >= self.episode_length
 
-        return terminated, truncateds
+        return terminated, truncated
