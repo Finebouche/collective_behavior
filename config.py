@@ -11,7 +11,7 @@ run_config = dict(
         num_predators=[2, 4],
         stage_size=25,
         episode_length=500,
-        prey_consumed=False,
+        prey_consumed=True,
         # Physics
         dragging_force_coefficient=2,
         contact_force_coefficient=25,

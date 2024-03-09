@@ -332,19 +332,22 @@ class Particle2dEnvironment(MultiAgentEnv):
                 dist_min = agent_a.radius + agent_b.radius
 
                 if dist < dist_min:  # There's a collision
-                    k = self.contact_margin  # This should be defined in your class
-                    penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
-                    force_magnitude = self.contact_force_coefficient * penetration  # This should also be defined in your class
-
-                    if dist == 0:  # To avoid division by zero
-                        force_direction = np.random.rand(2)
-                        force_direction /= np.linalg.norm(force_direction)  # Normalize
+                    if agent_a.agent_type != agent_b.agent_type
+                        continue
                     else:
-                        force_direction = np.array([delta_x, delta_y]) / dist
-
-                    force = force_magnitude * force_direction
-                    contact_force_dict[agent_a.agent_id] += force
-                    contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
+                        k = self.contact_margin  # This is defined in config
+                        penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
+                        force_magnitude = self.contact_force_coefficient * penetration  # This is defined in config
+    
+                        if dist == 0:  # To avoid division by zero
+                            force_direction = np.random.rand(2)
+                            force_direction /= np.linalg.norm(force_direction)  # Normalize
+                        else:
+                            force_direction = np.array([delta_x, delta_y]) / dist
+    
+                        force = force_magnitude * force_direction
+                        contact_force_dict[agent_a.agent_id] += force
+                        contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
 
         for agent in self.agents:
             if agent.still_in_game == 1:
