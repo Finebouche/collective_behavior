@@ -293,15 +293,18 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.timestep += 1
 
         sub_steps_nb = int(round(1 / self.dt))
+        all_eating_events = []
         for i in range(sub_steps_nb):
             action_list = action_list if i == 0 else None  # the agent use action once and then the physics do the rest
             if self.use_vectorized:
                 self._simulate_one_vectorized_step(action_list)
             else:
-                self._simulate_one_step(self.dt, action_list)
+                eating_events = self._simulate_one_step(self.dt, action_list)
+                # append the eating events to the list
+                all_eating_events.extend(eating_events)
 
         observation_dict = self._get_observation_dict()
-        reward_dict = self._get_reward(action_list)
+        reward_dict = self._get_reward(action_list, all_eating_events)
         terminated, truncated = self._get_done()
 
         # get array of locations for each agent
@@ -318,6 +321,7 @@ class Particle2dEnvironment(MultiAgentEnv):
     def _simulate_one_step(self, dt, action_dict=None):
 
         # BUMP INTO OTHER AGENTS
+        eating_events = []
         contact_force_dict = {agent.agent_id: np.array([0, 0], dtype=np.float64) for agent in self.agents}
         for a, agent_a in enumerate(self.agents):
             for b, agent_b in enumerate(self.agents):
@@ -332,8 +336,11 @@ class Particle2dEnvironment(MultiAgentEnv):
                 dist_min = agent_a.radius + agent_b.radius
 
                 if dist < dist_min:  # There's a collision
-                    if agent_a.agent_type != agent_b.agent_type
-                        continue
+                    if agent_a.agent_type != agent_b.agent_type:
+                        prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (agent_b, agent_a)
+                        eating_events.append({"predator_id": predator_agent.agent_id, "prey_id": prey_agent.agent_id})
+                        prey_agent.still_in_game = 0
+                        self.num_preys -= 1
                     else:
                         k = self.contact_margin  # This is defined in config
                         penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
@@ -435,43 +442,36 @@ class Particle2dEnvironment(MultiAgentEnv):
                     agent.loc_x = agent.loc_x % self.stage_size
                     agent.loc_y = agent.loc_y % self.stage_size
 
+        return eating_events
+
     def _simulate_one_vectorized_step(self, action_dict=None):
         # Not worth it for small number of agents !
         raise NotImplementedError("See archive.py")
 
-    def _get_reward(self, action_list):
+    def _get_reward(self, action_list, all_eating_events):
         # Initialize rewards
         reward_list = {agent.agent_id: 0 for agent in self.agents}
 
         predator_agents = [other_agent for other_agent in self.agents if other_agent.agent_type == 1]
+
+        for event in all_eating_events:
+            predator_id, prey_id = event["predator_id"], event["prey_id"]
+            # Apply the eating reward for the predator and the death penalty for the prey
+            reward_list[predator_id] += self.eating_reward_for_predator
+            reward_list[prey_id] += self.death_penalty_for_prey
+            # collective penalty for preys
+            for agent in self.agents:
+                if agent.still_in_game == 1:
+                    if agent.agent_type == 0:  # Prey
+                        reward_list[agent.agent_id] += self.collective_death_penalty_for_prey
+                    elif agent.agent_type == 1:  # Predator
+                        reward_list[agent.agent_id] += self.collective_eating_reward_for_predator
 
         for agent in self.agents:
             if agent.still_in_game:
                 # AGENT EATEN OR NOT
                 if agent.agent_type == 0:  # 0 for prey, is_prey
                     reward_list[agent.agent_id] += self.surviving_reward_for_prey
-
-                    # Check if the agent is touching a predator
-                    for predator_agent in predator_agents:
-                        dist = ComputeDistance(predator_agent, agent)
-                        eating_distance = predator_agent.radius + agent.radius
-                        if dist < eating_distance:
-                            # The prey is eaten
-                            reward_list[predator_agent.agent_id] += self.eating_reward_for_predator
-                            reward_list[agent.agent_id] += self.death_penalty_for_prey
-                            if self.prey_consumed:
-                                self.num_preys -= 1
-                                agent.still_in_game = 0
-
-                            # collective penalty for preys
-                            for prey_agent in self.agents:
-                                if prey_agent.agent_type == 0 and prey_agent.still_in_game == 1:
-                                    reward_list[prey_agent.agent_id] += self.collective_death_penalty_for_prey
-
-                            # collective rewards for predators
-                            for predator_agent_2 in predator_agents:
-                                reward_list[predator_agent_2.agent_id] += self.collective_eating_reward_for_predator
-
                 else:  # is_predator
                     reward_list[agent.agent_id] += self.starving_penalty_for_predator
 
