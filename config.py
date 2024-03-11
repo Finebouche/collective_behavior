@@ -11,7 +11,7 @@ run_config = dict(
         num_predators=[2, 4],
         stage_size=25,
         episode_length=500,
-        prey_consumed=True,
+        prey_consumed=False,
         # Physics
         dragging_force_coefficient=2,
         contact_force_coefficient=25,
@@ -36,7 +36,7 @@ run_config = dict(
         surviving_reward_for_prey=0,
         death_penalty_for_prey=-1.0,
         collective_death_penalty_for_prey=-0,
-        edge_hit_penalty=-0.0001,
+        edge_hit_penalty=-0.001,
         energy_cost_penalty_coef=0.00001, # positive (this is for a ratio)
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)

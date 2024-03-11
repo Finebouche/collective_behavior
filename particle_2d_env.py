@@ -281,10 +281,11 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # Assigning the vectorized values to agents
         for i, agent in enumerate(self.agents):
-            agent.loc_x, agent.loc_y = loc_x[i], loc_y[i]
-            agent.speed_x, agent.speed_y = 0.0, 0.0
-            agent.heading = headings[i]
-            agent.still_in_game = int(i < self.num_agents)
+            if i < self.num_agents:
+                agent.loc_x, agent.loc_y = loc_x[i], loc_y[i]
+                agent.speed_x, agent.speed_y = 0.0, 0.0
+                agent.heading = headings[i]
+                agent.still_in_game = 1
 
         observation_list = self._get_observation_dict()
         return observation_list, {}
@@ -303,14 +304,17 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # append the eating events to the list
                 all_eating_events.extend(eating_events)
 
-        observation_dict = self._get_observation_dict()
         reward_dict = self._get_reward(action_list, all_eating_events)
+        observation_dict = self._get_observation_dict()
         terminated, truncated = self._get_done()
 
         # get array of locations for each agent
-        loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-        loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-        dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
+        if self.num_preys > 0: 
+            loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
+        else:
+            dos = None
         infos = {"__common__": {"dos": dos, "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
@@ -339,22 +343,23 @@ class Particle2dEnvironment(MultiAgentEnv):
                     if agent_a.agent_type != agent_b.agent_type:
                         prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (agent_b, agent_a)
                         eating_events.append({"predator_id": predator_agent.agent_id, "prey_id": prey_agent.agent_id})
-                        prey_agent.still_in_game = 0
-                        self.num_preys -= 1
+                        if self.prey_consumed:
+                            prey_agent.still_in_game = 0
+                            self.num_preys -= 1
+                            continue
+                    k = self.contact_margin  # This is defined in config
+                    penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
+                    force_magnitude = self.contact_force_coefficient * penetration  # This is defined in config
+
+                    if dist == 0:  # To avoid division by zero
+                        force_direction = np.random.rand(2)
+                        force_direction /= np.linalg.norm(force_direction)  # Normalize
                     else:
-                        k = self.contact_margin  # This is defined in config
-                        penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
-                        force_magnitude = self.contact_force_coefficient * penetration  # This is defined in config
-    
-                        if dist == 0:  # To avoid division by zero
-                            force_direction = np.random.rand(2)
-                            force_direction /= np.linalg.norm(force_direction)  # Normalize
-                        else:
-                            force_direction = np.array([delta_x, delta_y]) / dist
-    
-                        force = force_magnitude * force_direction
-                        contact_force_dict[agent_a.agent_id] += force
-                        contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
+                        force_direction = np.array([delta_x, delta_y]) / dist
+
+                    force = force_magnitude * force_direction
+                    contact_force_dict[agent_a.agent_id] += force
+                    contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
 
         for agent in self.agents:
             if agent.still_in_game == 1:
@@ -524,10 +529,13 @@ class MetricsCallbacks(DefaultCallbacks):
     def on_episode_step(self, worker, base_env, policies, episode, **kwargs):
         # Assuming you can extract loc_x and loc_y from the episode
         info = episode.last_info_for("__common__")
-        episode.user_data["dos"].append(info["dos"])
+        if info["dos"] is not None:
+            episode.user_data["dos"].append(info["dos"])
 
     def on_episode_end(self, worker, base_env, policies, episode, **kwargs):
         # Average DoS at the end of episode
         info = episode.last_info_for("__common__")
+        if info["timestep"] == 0:
+            raise ValueError("Timestep not supposed to be 0 here, there must be an error.")
         average_dos = sum(episode.user_data['dos']) / info["timestep"]
         episode.custom_metrics['dos'] = average_dos
