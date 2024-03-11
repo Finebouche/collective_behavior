@@ -1,19 +1,39 @@
+
 import numpy as np
 
 
 def calculate_dos(loc_x, loc_y):
-    loc_x = np.array(loc_x)
-    loc_y = np.array(loc_y)
+    # Dos : degree of sparsity
+    # It is a measure of the density of the agents in the environment
+    # It is calculated as the average normalized distance to the nearest neighborhood of all conspecifics in an episode
+    if not loc_x or not loc_y:  # If no agents are present
+        return 0
 
-    # Check if the arrays are not empty and have the same length
-    if loc_x.size == 0 or loc_y.size == 0:
-        raise ValueError("Both loc_x and loc_y must be non-empty arrays.")
-    if loc_x.shape[0] != loc_y.shape[0]:
-        raise ValueError("Arrays loc_x and loc_y must have the same length.")
+    locations = np.vstack((loc_x, loc_y)).T
 
-    distances = np.sqrt((loc_x[:, np.newaxis] - loc_x[np.newaxis, :]) ** 2 + (loc_y[:, np.newaxis] - loc_y[np.newaxis, :]) ** 2)
-    np.fill_diagonal(distances, np.inf)
-    min_distances = np.min(distances, axis=1)
+    # Calculate the pairwise distances using np.linalg.norm
+    distances = np.linalg.norm(locations[:, np.newaxis] - locations, axis=2)
+    sorted_distances = np.sort(distances, axis=1)
+    # Pick the second-smallest distance (first one is zero for self-distance)
+    min_distances = sorted_distances[:, 1]
     sum_min_distances = np.sum(min_distances)
 
     return sum_min_distances
+
+
+def calculate_doa(headings):
+    # Calculates the Degree of Alignment (DoA) among agents based on their headings.
+
+    if len(headings) < 2:  # Need at least two agents to calculate DoA
+        return 0
+
+    headings = np.array(headings)
+    # Ensure headings are in radians for np.cos computation
+    alignments = headings[:, np.newaxis] - headings[np.newaxis, :]
+    sorted_alignments = np.sort(alignments, axis=1)
+    # Pick the second-smallest alignments (first one is zero for self-alignments)
+    min_alignments = sorted_alignments[:, 1]
+    sum_alignments = np.sum(min_alignments)
+
+    return sum_alignments
+s

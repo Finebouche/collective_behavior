@@ -7,7 +7,7 @@ from gymnasium.utils import seeding
 from ray.rllib.env.env_context import EnvContext
 
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from metrics import calculate_dos
+from metrics import calculate_dos, calculate_doa
 
 
 def sign(x):
@@ -309,13 +309,16 @@ class Particle2dEnvironment(MultiAgentEnv):
         terminated, truncated = self._get_done()
 
         # get array of locations for each agent
-        if self.num_preys > 0: 
+        if self.num_preys > 0:
             loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            heading = [agent.heading for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
+            doa = calculate_doa(heading) / (self.num_preys * 2 * np.pi)
         else:
             dos = None
-        infos = {"__common__": {"dos": dos, "timestep": self.timestep}}
+            doa = None
+        infos = {"__common__": {"dos": dos, "doa": doa, "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
 
@@ -525,17 +528,19 @@ class MetricsCallbacks(DefaultCallbacks):
     def on_episode_start(self, worker, base_env, policies, episode, **kwargs):
         # Initialize sum of DoS for the episode
         episode.user_data['dos'] = []
+        episode.user_data['doa'] = []
 
     def on_episode_step(self, worker, base_env, policies, episode, **kwargs):
         # Assuming you can extract loc_x and loc_y from the episode
         info = episode.last_info_for("__common__")
-        if info["dos"] is not None:
-            episode.user_data["dos"].append(info["dos"])
+        episode.user_data["dos"].append(info["dos"])
+        episode.user_data["doa"].append(info["doa"])
 
     def on_episode_end(self, worker, base_env, policies, episode, **kwargs):
         # Average DoS at the end of episode
         info = episode.last_info_for("__common__")
-        if info["timestep"] == 0:
-            raise ValueError("Timestep not supposed to be 0 here, there must be an error.")
         average_dos = sum(episode.user_data['dos']) / info["timestep"]
+        average_doa = sum(episode.user_data['doa']) / info["timestep"]
         episode.custom_metrics['dos'] = average_dos
+        episode.custom_metrics['doa'] = average_doa
+
