@@ -146,11 +146,15 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.max_turn = config.get('max_turn')
 
         self.action_space = spaces.Dict({
-            agent.agent_id: spaces.Box(low=np.array([0, -self.max_turn]),
-                                       high=np.array([
-                                           self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator,
-                                           self.max_turn]), shape=(2,),
-                                       dtype=self.float_dtype) for agent in self.agents
+            agent.agent_id: spaces.Box(
+                low=np.array([0, -self.max_turn]),
+                high=np.array([
+                    self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator,
+                    self.max_turn]
+                ),
+                dtype=self.float_dtype,
+                shape=(2,)
+            ) for agent in self.agents
         })
 
         # OBSERVATION SETTINGS
@@ -179,9 +183,11 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
-                low=-1, high=1,
-                shape=(self.observation_size,),
-                dtype=self.float_dtype) for agent in self.agents
+                low=-1, 
+                high=1,
+                dtype=self.float_dtype,
+                shape=(self.observation_size,)
+            ) for agent in self.agents
         })
 
         # REWARDS
@@ -298,7 +304,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         for i in range(sub_steps_nb):
             action_list = action_list if i == 0 else None  # the agent use action once and then the physics do the rest
             if self.use_vectorized:
-                self._simulate_one_vectorized_step(action_list)
+                self._simulate_one_vectorized_step(self.dt, action_list)
             else:
                 eating_events = self._simulate_one_step(self.dt, action_list)
                 # append the eating events to the list
@@ -313,11 +319,11 @@ class Particle2dEnvironment(MultiAgentEnv):
             loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             heading = [agent.heading for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
+            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal) 
             doa = calculate_doa(heading) / (self.num_preys * 2 * np.pi)
         else:
-            dos = None
-            doa = None
+            dos = 0
+            doa = 0
         infos = {"__common__": {"dos": dos, "doa": doa, "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
@@ -329,10 +335,10 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # BUMP INTO OTHER AGENTS
         eating_events = []
-        contact_force_dict = {agent.agent_id: np.array([0, 0], dtype=np.float64) for agent in self.agents}
+        contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.agents}
         for a, agent_a in enumerate(self.agents):
             for b, agent_b in enumerate(self.agents):
-                if b <= a:  # Avoid double-checking and self-checking
+                if b < a:  # Avoid double-checking and self-checking
                     continue
                 if not agent_a.still_in_game or not agent_b.still_in_game:
                     continue
@@ -350,6 +356,8 @@ class Particle2dEnvironment(MultiAgentEnv):
                             prey_agent.still_in_game = 0
                             self.num_preys -= 1
                             continue
+                    if agent_a.agent_type != agent_b.agent_type and self.prey_consumed:
+                        print("this should never happend, because of continue")
                     k = self.contact_margin  # This is defined in config
                     penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
                     force_magnitude = self.contact_force_coefficient * penetration  # This is defined in config
@@ -416,8 +424,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Update speed using acceleration
-                agent.speed_x += acceleration_x / (agent.radius ** 3 * self.agent_density) * dt
-                agent.speed_y += acceleration_y / (agent.radius ** 3 * self.agent_density) * dt
+                agent.speed_x += acceleration_x * dt / (agent.radius ** 3 * self.agent_density)
+                agent.speed_y += acceleration_y * dt / (agent.radius ** 3 * self.agent_density)
 
                 # limit the speed
                 max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
@@ -452,7 +460,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         return eating_events
 
-    def _simulate_one_vectorized_step(self, action_dict=None):
+    def _simulate_one_vectorized_step(self, dt, action_dict=None):
         # Not worth it for small number of agents !
         raise NotImplementedError("See archive.py")
 
@@ -488,10 +496,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # set the energy cost penalty
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
-                energy_cost_penalty = -(
-                        abs(self_force_amplitude)
-                        + abs(self_force_orientation)
-                ) * self.energy_cost_penalty_coef
+                energy_cost_penalty = -(abs(self_force_amplitude) + abs(self_force_orientation)) * self.energy_cost_penalty_coef
                 reward_list[agent.agent_id] += energy_cost_penalty
 
                 # WALL avoidance

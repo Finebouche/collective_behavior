@@ -6,16 +6,15 @@ def calculate_dos(loc_x, loc_y):
     # Dos : degree of sparsity
     # It is a measure of the density of the agents in the environment
     # It is calculated as the average normalized distance to the nearest neighborhood of all conspecifics in an episode
-    if not loc_x or not loc_y:  # If no agents are present
+    if len(loc_x) < 2 or len(loc_y) < 2:  # If 1 or 0 agent
         return 0
 
     locations = np.vstack((loc_x, loc_y)).T
 
     # Calculate the pairwise distances using np.linalg.norm
     distances = np.linalg.norm(locations[:, np.newaxis] - locations, axis=2)
-    sorted_distances = np.sort(distances, axis=1)
-    # Pick the second-smallest distance (first one is zero for self-distance)
-    min_distances = sorted_distances[:, 1]
+    np.fill_diagonal(distances, np.inf)
+    min_distances = np.min(distances, axis=1)
     sum_min_distances = np.sum(min_distances)
 
     return sum_min_distances
@@ -28,12 +27,21 @@ def calculate_doa(headings):
         return 0
 
     headings = np.array(headings)
-    # Ensure headings are in radians for np.cos computation
-    alignments = headings[:, np.newaxis] - headings[np.newaxis, :]
-    sorted_alignments = np.sort(alignments, axis=1)
-    # Pick the second-smallest alignments (first one is zero for self-alignments)
-    min_alignments = sorted_alignments[:, 1]
+    n = len(headings)
+    alignments = np.zeros((n, n))
+
+    # Calculate pairwise angular differences, taking the circular nature into account
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                diff = abs(headings[i] - headings[j])
+                # Considering circular nature of angles: the difference should be in the range [0, π]
+                alignments[i, j] = min(diff, 2*np.pi - diff)
+            else:
+                alignments[i, j] = np.inf  # Ignore self-comparison
+
+    # Take the minimum alignment for each agent, and then sum these minimums
+    min_alignments = np.min(alignments, axis=1)
     sum_alignments = np.sum(min_alignments)
 
     return sum_alignments
-s
