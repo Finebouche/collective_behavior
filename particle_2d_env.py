@@ -183,7 +183,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
-                low=-1, 
+                low=-1,
                 high=1,
                 dtype=self.float_dtype,
                 shape=(self.observation_size,)
@@ -319,7 +319,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
             heading = [agent.heading for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal) 
+            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
             doa = calculate_doa(heading) / (self.num_preys * 2 * np.pi)
         else:
             dos = 0
@@ -350,7 +350,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 if dist < dist_min:  # There's a collision
                     if agent_a.agent_type != agent_b.agent_type:
-                        prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (agent_b, agent_a)
+                        prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (
+                            agent_b, agent_a)
                         eating_events.append({"predator_id": predator_agent.agent_id, "prey_id": prey_agent.agent_id})
                         if self.prey_consumed:
                             prey_agent.still_in_game = 0
@@ -496,7 +497,9 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # set the energy cost penalty
                 self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
-                energy_cost_penalty = -(abs(self_force_amplitude) + abs(self_force_orientation)) * self.energy_cost_penalty_coef
+                energy_cost_penalty = -(
+                        abs(self_force_amplitude) + abs(self_force_orientation)
+                ) * self.energy_cost_penalty_coef
                 reward_list[agent.agent_id] += energy_cost_penalty
 
                 # WALL avoidance
@@ -548,4 +551,3 @@ class MetricsCallbacks(DefaultCallbacks):
         average_doa = sum(episode.user_data['doa']) / info["timestep"]
         episode.custom_metrics['dos'] = average_dos
         episode.custom_metrics['doa'] = average_doa
-
