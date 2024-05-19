@@ -221,7 +221,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
         # speed
         # add speed normalized by max speed for prey or predator
-        max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
+        max_speed = max(self.max_speed_prey, self.max_speed_predator)
 
         if not self.use_polar_coordinate:
             obs[3] = agent.speed_x / max_speed
@@ -253,7 +253,6 @@ class Particle2dEnvironment(MultiAgentEnv):
             obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
             if self.use_speed_observation:
                 # add speed normalized by max speed for prey or predator
-                max_speed = self.max_speed_prey if other.agent_type == 0 else self.max_speed_predator
 
                 if not self.use_polar_coordinate:
                     obs[base_index + 3] = (other.speed_x - agent.speed_x) / max_speed

@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib import animation
 from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d import art3d
-
+import concurrent.futures
 
 def generate_animation_3d(
         episode_states,
@@ -104,6 +104,7 @@ def generate_animation_3d(
         labels[1].set_text("preys Left:".ljust(14) + f"{init_num_preys:4} ({100:.0f}%)")
         return lines + labels + trail_lines
 
+        
     # Animate
     trail = 1
     def animate(i):
@@ -143,7 +144,7 @@ def generate_animation_3d(
                 line.set_marker("")
                 trail_lines[idx].set_color(runner_not_in_game_color)
                 trail_lines[idx].set_alpha(0)
-
+                
         n_preys_alive = episode_states["still_in_the_game"][i].sum() - env.num_predators
         labels[0].set_text("Time Step:".ljust(14) + f"{i:4.0f}\n")
         labels[1].set_text("preys Left:".ljust(14) + f"{n_preys_alive:4} ({n_preys_alive / init_num_preys * 100:.0f}%)")
