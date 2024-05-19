@@ -19,3 +19,4 @@ dependencies:
     - torch
     - wandb
     - ipywidgets
+    - jupyterlab-execute-time
