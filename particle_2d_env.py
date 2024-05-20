@@ -79,7 +79,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.use_vectorized = config.get('use_vectorized')
         self.step_per_time_increment = config.get('step_per_time_increment')
         assert isinstance(self.step_per_time_increment, int)
-        self.dt = 1/self.step_per_time_increment
+        self.dt = 1 / self.step_per_time_increment
 
         # ENVIRONMENT
         self.timestep = 0
@@ -495,12 +495,13 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # ENERGY EFFICIENCY
                 # Add the energy efficiency penalty
                 # set the energy cost penalty
-                self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                if action_list is not None:
+                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
 
-                energy_cost_penalty = -(
-                        abs(self_force_amplitude) + abs(self_force_orientation)
-                ) * self.energy_cost_penalty_coef
-                reward_list[agent.agent_id] += energy_cost_penalty
+                    energy_cost_penalty = -(
+                            abs(self_force_amplitude) + abs(self_force_orientation)
+                    ) * self.energy_cost_penalty_coef
+                    reward_list[agent.agent_id] += energy_cost_penalty
 
                 # WALL avoidance
                 # Check if the agent is touching the edge
