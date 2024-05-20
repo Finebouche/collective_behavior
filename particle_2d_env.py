@@ -77,7 +77,9 @@ class Particle2dEnvironment(MultiAgentEnv):
             self.np_random, seed = seeding.np_random(seed)
 
         self.use_vectorized = config.get('use_vectorized')
-        self.dt = config.get('temporal_increment')
+        self.step_per_time_increment = config.get('step_per_time_increment')
+        assert isinstance(self.step_per_time_increment, int)
+        self.dt = 1/self.step_per_time_increment
 
         # ENVIRONMENT
         self.timestep = 0
@@ -298,9 +300,8 @@ class Particle2dEnvironment(MultiAgentEnv):
     def step(self, action_list):
         self.timestep += 1
 
-        sub_steps_nb = int(round(1 / self.dt))
         all_eating_events = []
-        for i in range(sub_steps_nb):
+        for i in range(self.step_per_time_increment):
             action_list = action_list if i == 0 else None  # the agent use action once and then the physics do the rest
             if self.use_vectorized:
                 self._simulate_one_vectorized_step(self.dt, action_list)

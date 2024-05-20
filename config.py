@@ -5,7 +5,7 @@ run_config = dict(
     env=dict(
         # Computational
         use_vectorized=False,   # mostly useless for low number of fish
-        temporal_increment = 1, # default 1, should be between [0,1]
+        step_per_time_increment = 5, # int ≥ 1
         # General
         num_preys=20,
         num_predators=5,
@@ -23,10 +23,10 @@ run_config = dict(
         predator_radius=0.5,
         agent_density=1000,  # density of the agents to calculate the mass (should be arround 1000 if radius about 0.1)
         max_speed_prey=1,
-        max_speed_predator=8,
+        max_speed_predator=24,
         # Action
         max_acceleration_prey=1,
-        max_acceleration_predator=16,
+        max_acceleration_predator=24,
         max_turn=np.pi / 4,  # pi radians
         # Rewards
         # reward must be positive, penalty must be negative
