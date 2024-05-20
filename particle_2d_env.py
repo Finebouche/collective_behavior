@@ -185,8 +185,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
-                low=-1,
-                high=1,
+                low=-np.inf,
+                high=np.inf,
                 dtype=self.float_dtype,
                 shape=(self.observation_size,)
             ) for agent in self.agents
@@ -204,12 +204,12 @@ class Particle2dEnvironment(MultiAgentEnv):
 
     def _observation_pos(self, agent, other_agent):
         if not self.use_polar_coordinate:
-            return (other_agent.loc_x - agent.loc_x) / self.grid_diagonal, (
-                    other_agent.loc_y - agent.loc_y) / self.grid_diagonal
+            return (other_agent.loc_x - agent.loc_x), (
+                    other_agent.loc_y - agent.loc_y)
         else:
             dist = ComputeDistance(agent, other_agent)
             direction = ComputeAngle(agent, other_agent)
-            return dist / self.grid_diagonal, direction / (2 * np.pi)
+            return dist, direction
 
     def _generate_observation(self, agent):
         # initialize obs as an empty list of correct size
@@ -217,20 +217,17 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # SELF OBSERVATION
         # Distance to walls
-        obs[0] = agent.loc_x / self.grid_diagonal
-        obs[1] = agent.loc_y / self.grid_diagonal
+        obs[0] = agent.loc_x
+        obs[1] = agent.loc_y
         # modulo 2pi to avoid large values
-        obs[2] = agent.heading % (2 * np.pi) / (2 * np.pi)
+        obs[2] = agent.heading % (2 * np.pi)
         # speed
-        # add speed normalized by max speed for prey or predator
-        max_speed = max(self.max_speed_prey, self.max_speed_predator)
-
         if not self.use_polar_coordinate:
-            obs[3] = agent.speed_x / max_speed
-            obs[4] = agent.speed_y / max_speed
+            obs[3] = agent.speed_x
+            obs[4] = agent.speed_y
         else:
-            obs[3] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2) / max_speed
-            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi) / (2 * np.pi)
+            obs[3] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -252,17 +249,17 @@ class Particle2dEnvironment(MultiAgentEnv):
             # count the number of already observed properties
             base_index = 5 + j * self.num_observed_properties
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
-            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) / np.pi  # relative heading
+            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) # relative heading
             if self.use_speed_observation:
                 # add speed normalized by max speed for prey or predator
 
                 if not self.use_polar_coordinate:
-                    obs[base_index + 3] = (other.speed_x - agent.speed_x) / max_speed
-                    obs[base_index + 4] = (other.speed_y - agent.speed_y) / max_speed
+                    obs[base_index + 3] = (other.speed_x - agent.speed_x)
+                    obs[base_index + 4] = (other.speed_y - agent.speed_y)
                 else:
                     obs[base_index + 3] = math.sqrt(
                         (other.speed_x - agent.speed_x) ** 2 + (other.speed_y - agent.speed_y) ** 2
-                    ) / max_speed
+                    )
                     obs[base_index + 4] = math.atan2(other.speed_y - agent.speed_y,
                                                      other.speed_x - agent.speed_x
                                                      ) - agent.heading
