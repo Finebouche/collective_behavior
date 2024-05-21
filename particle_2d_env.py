@@ -149,11 +149,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(
-                low=np.array([0, -self.max_turn]),
-                high=np.array([
-                    self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator,
-                    self.max_turn]
-                ),
+                low=np.array([0, -1]), # this gets multiplied later
+                high=np.array([1,-1]), # this gets multiplied later
                 dtype=self.float_dtype,
                 shape=(2,)
             ) for agent in self.agents
@@ -301,7 +298,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         for i in range(self.step_per_time_increment):
             action_list = action_list if i == 0 else None  # the agent use action once and then the physics do the rest
             if self.use_vectorized:
-                self._simulate_one_vectorized_step(self.dt, action_list)
+                eating_events = self._simulate_one_vectorized_step(self.dt, action_list)
             else:
                 eating_events = self._simulate_one_step(self.dt, action_list)
                 # append the eating events to the list
@@ -393,7 +390,8 @@ class Particle2dEnvironment(MultiAgentEnv):
                 if action_dict is not None:
                     # get the actions for this agent
                     self_force_amplitude, self_force_orientation = action_dict.get(agent.agent_id)
-                    agent.heading = (agent.heading + self_force_orientation) % (2 * np.pi)
+                    agent.heading = (agent.heading + self_force_orientation * self.max_turn) % (2 * np.pi)
+                    self_force_amplitude *= self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator
                     acceleration_x += self_force_amplitude * math.cos(agent.heading)
                     acceleration_y += self_force_amplitude * math.sin(agent.heading)
 
@@ -422,8 +420,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Update speed using acceleration
-                agent.speed_x += acceleration_x * dt / (agent.radius ** 3 * self.agent_density)
-                agent.speed_y += acceleration_y * dt / (agent.radius ** 3 * self.agent_density)
+                agent.speed_x += acceleration_x * dt #/ (agent.radius ** 3 * self.agent_density)
+                agent.speed_y += acceleration_y * dt #/ (agent.radius ** 3 * self.agent_density)
 
                 # limit the speed
                 max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator

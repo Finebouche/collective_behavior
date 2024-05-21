@@ -23,10 +23,10 @@ run_config = dict(
         predator_radius=0.5,
         agent_density=1000,  # density of the agents to calculate the mass (should be arround 1000 if radius about 0.1)
         max_speed_prey=1,
-        max_speed_predator=24,
+        max_speed_predator=8,
         # Action
-        max_acceleration_prey=1,
-        max_acceleration_predator=24,
+        max_acceleration_prey=1.0,
+        max_acceleration_predator=8.0,
         max_turn=np.pi / 4,  # pi radians
         # Rewards
         # reward must be positive, penalty must be negative
