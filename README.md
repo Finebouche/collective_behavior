@@ -5,6 +5,14 @@ This repository contains the implementation of a multi-agent reinforcement learn
 
 # Setup
 
+## Clone this repo
+
+Use the way you prefer.
+
+```sh
+git clone https://github.com/Finebouche/collective_behavior.git
+```
+
 ## Configure Conda Environment
 To install the dependencies, you should create a Conda environment. If you haven’t installed Conda, please follow the [official installation guide](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Once you have Conda installed, you can create an environment using the following command:
 
@@ -27,13 +35,6 @@ conda activate <env_name>
 
 Replace ```<env_name>``` with the name of your environment.
 
-## Clone this repo
-
-Use the way you prefer.
-
-```sh
-pip install -r requirements.txt
-```
 
 # Code Overview
 
