@@ -13,6 +13,7 @@ run_config = dict(
         episode_length=700,
         prey_consumed=True,
         # Physics
+        inertia=True,
         dragging_force_coefficient=0.3,
         contact_force_coefficient=25,
         contact_margin=0.5,

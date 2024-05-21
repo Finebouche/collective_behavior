@@ -92,6 +92,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.grid_diagonal = self.stage_size * np.sqrt(2)
 
         # PHYSICS
+        self.inertia = config.get('inertia')
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
         self.contact_force_coefficient = config.get('contact_force_coefficient')
         self.contact_margin = config.get('contact_margin')
@@ -420,10 +421,14 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Update speed using acceleration
-                agent.speed_x += acceleration_x * dt #/ (agent.radius ** 3 * self.agent_density)
-                agent.speed_y += acceleration_y * dt #/ (agent.radius ** 3 * self.agent_density)
+                agent.speed_x += acceleration_x * dt
+                agent.speed_y += acceleration_y * dt
 
-                # limit the speed
+                if self.inertia:
+                    agent.speed_x /= (agent.radius ** 3 * self.agent_density)
+                    agent.speed_y /= (agent.radius ** 3 * self.agent_density)
+
+                # Apply the speed limit
                 max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
                 current_speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
                 if current_speed > max_speed:
