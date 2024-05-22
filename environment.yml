@@ -7,13 +7,13 @@ dependencies:
   - ffmpeg
   - jupyterlab
   - matplotlib
-  - tqdm
   - graph-tool
   - pip
   - pip:
     - ray[rllib]
     - gymnasium
     - numpy
+    - tqdm
     - torch
     - wandb
     - ipywidgets
