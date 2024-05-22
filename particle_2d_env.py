@@ -150,8 +150,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(
-                low=np.array([0, -1]), # this gets multiplied later
-                high=np.array([1,-1]), # this gets multiplied later
+                low=np.array([0, -1]),  # this gets multiplied later
+                high=np.array([1, -1]),  # this gets multiplied later
                 dtype=self.float_dtype,
                 shape=(2,)
             ) for agent in self.agents
@@ -176,10 +176,11 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.use_speed_observation = config.get('use_speed_observation')
 
         # Number of observed properties
-        self.num_observed_properties = 4  # heading, position and type are always observed
+        self.self_observed_properties = 7  # 4 position, 1 heading, 2 speed
+        self.num_observed_properties = 4  # relative heading and positions + type are always observed
         if self.use_speed_observation:  # speed is observed when use_speed_observation is True
             self.num_observed_properties += 2
-        self.observation_size = 5 + self.num_observed_properties * self.num_other_agents_observed
+        self.observation_size = self.self_observed_properties + self.num_observed_properties * self.num_other_agents_observed
 
         self.observation_space = spaces.Dict({
             agent.agent_id: spaces.Box(
@@ -217,15 +218,17 @@ class Particle2dEnvironment(MultiAgentEnv):
         # Distance to walls
         obs[0] = agent.loc_x
         obs[1] = agent.loc_y
+        obs[2] = self.stage_size - agent.loc_x
+        obs[3] = self.stage_size - agent.loc_y
         # modulo 2pi to avoid large values
-        obs[2] = agent.heading % (2 * np.pi)
+        obs[4] = agent.heading % (2 * np.pi)
         # speed
         if not self.use_polar_coordinate:
-            obs[3] = agent.speed_x
-            obs[4] = agent.speed_y
+            obs[5] = agent.speed_x
+            obs[6] = agent.speed_y
         else:
-            obs[3] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
-            obs[4] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)
+            obs[5] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+            obs[6] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -247,7 +250,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             # count the number of already observed properties
             base_index = 5 + j * self.num_observed_properties
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
-            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi) # relative heading
+            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi)  # relative heading
             if self.use_speed_observation:
                 # add speed normalized by max speed for prey or predator
 
@@ -303,7 +306,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             else:
                 eating_events = self._simulate_one_step(self.dt, action_list)
                 # append the eating events to the list
-                all_eating_events.extend(eating_events)
+            all_eating_events.extend(eating_events)
 
         reward_dict = self._get_reward(action_list, all_eating_events)
         observation_dict = self._get_observation_dict()
