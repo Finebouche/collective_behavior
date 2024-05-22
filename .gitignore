@@ -1,5 +1,7 @@
 .ipynb_checkpoints
 .idea
 ray_results
+artifacts
+wandb
 __pycache__
 wandb_api_key.txt
