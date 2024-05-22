@@ -51,7 +51,7 @@ class ParticuleAgent:
     def __init__(self, id=None, radius=None, agent_type=None,
                  loc_x=None, loc_y=None, heading=None,
                  speed_x=None, speed_y=None,
-                 still_in_game=True):
+                 still_in_game=1):
         self.agent_id = id
         self.agent_type = agent_type
         self.radius = radius
@@ -135,9 +135,9 @@ class Particle2dEnvironment(MultiAgentEnv):
                     agent_type, radius = 0, self.prey_radius  # for preys
                 else:
                     agent_type, radius = 1, self.predator_radius  # for predators
-                still_in_game = True
+                still_in_game = 1
             else:
-                agent_type, radius, still_in_game = None, None, False
+                agent_type, radius, still_in_game = None, None, 0
             self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
         self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
@@ -334,17 +334,18 @@ class Particle2dEnvironment(MultiAgentEnv):
         # BUMP INTO OTHER AGENTS
         eating_events = []
         contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.agents}
-        for a, agent_a in enumerate(self.agents):
-            for b, agent_b in enumerate(self.agents):
-                if b < a:  # Avoid double-checking and self-checking
+        for agent_a in self.agents:
+            for agent_b in self.agents:
+                if agent_a.agent_id < agent_b.agent_id:  # Avoid double-checking and self-checking
                     continue
-                if agent_a.still_in_game == 0 or not agent_b.still_in_game == 0:
+                if agent_a.still_in_game == 0 or agent_b.still_in_game == 0:
                     continue
-
+                    
                 delta_x = agent_a.loc_x - agent_b.loc_x
                 delta_y = agent_a.loc_y - agent_b.loc_y
                 dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
                 dist_min = agent_a.radius + agent_b.radius
+
 
                 if dist < dist_min:  # There's a collision
                     if agent_a.agent_type != agent_b.agent_type:
@@ -481,14 +482,13 @@ class Particle2dEnvironment(MultiAgentEnv):
             reward_list[prey_id] += self.death_penalty_for_prey
             # collective penalty for preys
             for agent in self.agents:
-                if agent.agent_type == 0:  # Prey
+                if agent.agent_type == 0 and agent.still_in_game == 1:  # Prey
                     reward_list[agent.agent_id] += self.collective_death_penalty_for_prey
                 elif agent.agent_type == 1:  # Predator
                     reward_list[agent.agent_id] += self.collective_eating_reward_for_predator
 
         for agent in self.agents:
             if agent.still_in_game:
-                # AGENT EATEN OR NOT
                 if agent.agent_type == 0:  # 0 for prey, is_prey
                     reward_list[agent.agent_id] += self.surviving_reward_for_prey
                 else:  # is_predator
