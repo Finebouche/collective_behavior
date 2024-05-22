@@ -335,7 +335,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             for b, agent_b in enumerate(self.agents):
                 if b < a:  # Avoid double-checking and self-checking
                     continue
-                if not agent_a.still_in_game or not agent_b.still_in_game:
+                if agent_a.still_in_game == 0 or not agent_b.still_in_game == 0:
                     continue
 
                 delta_x = agent_a.loc_x - agent_b.loc_x
@@ -419,19 +419,19 @@ class Particle2dEnvironment(MultiAgentEnv):
                         )
                         acceleration_y += sign(self.stage_size / 2 - agent.loc_y) * contact_force_amplitude_y
 
+                if self.inertia:
+                    acceleration_x /= (agent.radius ** 3 * self.agent_density)
+                    acceleration_y /= (agent.radius ** 3 * self.agent_density)
+
                 # # UPDATE ACCELERATION/SPEED/POSITION
                 # Update speed using acceleration
                 agent.speed_x += acceleration_x * dt
                 agent.speed_y += acceleration_y * dt
 
-                if self.inertia:
-                    agent.speed_x /= (agent.radius ** 3 * self.agent_density)
-                    agent.speed_y /= (agent.radius ** 3 * self.agent_density)
-
                 # Apply the speed limit
                 max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
                 current_speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
-                if current_speed > max_speed:
+                if max_speed is not None and current_speed > max_speed:
                     agent.speed_x *= max_speed / current_speed
                     agent.speed_y *= max_speed / current_speed
 

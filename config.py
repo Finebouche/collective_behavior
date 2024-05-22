@@ -17,14 +17,14 @@ run_config = dict(
         dragging_force_coefficient=0.3,
         contact_force_coefficient=25,
         contact_margin=0.5,
-        friction_regime="linear",            # linear=1, quadratic=2 or intermediate=1.4
+        friction_regime="intermediate",            # linear=1, quadratic=2 or intermediate=1.4
         periodical_boundary=False,           # If False, the wall is solid
         wall_contact_force_coefficient=20,    # Only used when periodical_boundary=False, else ignored
         prey_radius=0.1,
         predator_radius=0.5,
         agent_density=1000,  # density of the agents to calculate the mass (should be arround 1000 if radius about 0.1)
-        max_speed_prey=1,
-        max_speed_predator=8,
+        max_speed_prey=None,
+        max_speed_predator=None,
         # Action
         max_acceleration_prey=1.0,
         max_acceleration_predator=8.0,
