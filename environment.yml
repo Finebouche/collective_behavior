@@ -1,6 +1,5 @@
 name: collective_env
 channels:
-  - defaults
   - conda-forge
   - pytorch
 dependencies:
@@ -8,14 +7,13 @@ dependencies:
   - ffmpeg
   - jupyterlab
   - matplotlib
+  - tqdm
   - graph-tool
   - pip
   - pip:
     - ray[rllib]
     - gymnasium
     - numpy
-    - tensorflow
-    #- tensorflow-metal # [osx] # doesn't seem to work to detect GPU
     - torch
     - wandb
     - ipywidgets

@@ -9,7 +9,7 @@ run_config = dict(
         # General
         num_preys=20,
         num_predators=5,
-        stage_size=60,
+        stage_size=20,
         episode_length=700,
         prey_consumed=True,
         # Physics
@@ -21,7 +21,7 @@ run_config = dict(
         periodical_boundary=False,           # If False, the wall is solid
         wall_contact_force_coefficient=20,    # Only used when periodical_boundary=False, else ignored
         prey_radius=0.1,
-        predator_radius=0.5,
+        predator_radius=0.4,
         agent_density=1000,  # density of the agents to calculate the mass (should be arround 1000 if radius about 0.1)
         max_speed_prey=None,
         max_speed_predator=None,
@@ -41,7 +41,7 @@ run_config = dict(
         energy_cost_penalty_coef=0, # positive < 1 (this is for a ratio)
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)
-        max_seeing_distance=100,  # Put None if not used
+        max_seeing_distance=20,  # Put None if not used
         sort_by_distance=True,
         num_other_agents_observed=10,  # Put "all" if not used
         use_polar_coordinate=True,

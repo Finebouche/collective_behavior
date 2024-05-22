@@ -478,11 +478,10 @@ class Particle2dEnvironment(MultiAgentEnv):
             reward_list[prey_id] += self.death_penalty_for_prey
             # collective penalty for preys
             for agent in self.agents:
-                if agent.still_in_game == 1:
-                    if agent.agent_type == 0:  # Prey
-                        reward_list[agent.agent_id] += self.collective_death_penalty_for_prey
-                    elif agent.agent_type == 1:  # Predator
-                        reward_list[agent.agent_id] += self.collective_eating_reward_for_predator
+                if agent.agent_type == 0:  # Prey
+                    reward_list[agent.agent_id] += self.collective_death_penalty_for_prey
+                elif agent.agent_type == 1:  # Predator
+                    reward_list[agent.agent_id] += self.collective_eating_reward_for_predator
 
         for agent in self.agents:
             if agent.still_in_game:
