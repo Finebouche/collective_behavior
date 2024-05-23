@@ -19,25 +19,6 @@ def sign(x):
         return -1
 
 
-def ComputeDistance(agent1, agent2):
-    return math.sqrt(
-        ((agent1.loc_x - agent2.loc_x) ** 2)
-        + ((agent1.loc_y - agent2.loc_y) ** 2)
-    )
-
-
-def ComputeAngle(agent1, agent2):
-    # Compute relative heading between the two agents
-    direction = math.atan2(
-        agent2.loc_y - agent1.loc_y,
-        agent2.loc_x - agent1.loc_x
-    ) - agent1.heading
-
-    # Normalize the direction to the range [-pi, pi]
-    direction = (direction + np.pi) % (2 * np.pi) - np.pi
-    return direction
-
-
 # function that check if variable is an array, then choose a random int in the interval
 # return the number and the max_value
 def random_int_in_interval(variable):
@@ -201,13 +182,61 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.edge_hit_penalty = config.get('edge_hit_penalty')
         self.energy_cost_penalty_coef = config.get('energy_cost_penalty_coef')
 
+    def compute_distance(self, agent1, agent2):
+        if self.periodical_boundary:
+            # Calculate the distance considering wrapping at the boundaries
+            delta_x = abs(agent1.loc_x - agent2.loc_x)
+            delta_y = abs(agent1.loc_y - agent2.loc_y)
+
+            # Consider wrapping effect: if distance is greater than half the stage,
+            # it's shorter to go the other way around
+            delta_x = min(delta_x, self.stage_size - delta_x)
+            delta_y = min(delta_y, self.stage_size - delta_y)
+        else:
+            # Standard Euclidean distance
+            delta_x = agent1.loc_x - agent2.loc_x
+            delta_y = agent1.loc_y - agent2.loc_y
+
+        return math.sqrt(delta_x ** 2 + delta_y ** 2)
+
+    def compute_angle(self, agent1, agent2):
+        if self.periodical_boundary:
+            # Compute the shortest path deltas considering wrapping at the boundaries
+            delta_x = agent2.loc_x - agent1.loc_x
+            delta_y = agent2.loc_y - agent1.loc_y
+
+            # Adjust deltas for periodic boundary conditions
+            if abs(delta_x) > self.stage_size / 2:
+                if delta_x > 0:
+                    delta_x -= self.stage_size
+                else:
+                    delta_x += self.stage_size
+
+            if abs(delta_y) > self.stage_size / 2:
+                if delta_y > 0:
+                    delta_y -= self.stage_size
+                else:
+                    delta_y += self.stage_size
+        else:
+            # Compute the direct deltas without considering periodic boundaries
+            delta_x = agent2.loc_x - agent1.loc_x
+            delta_y = agent2.loc_y - agent1.loc_y
+
+        # Compute the direction to the other agent
+        direction = math.atan2(delta_y, delta_x) - agent1.heading
+
+        # Normalize the direction to the range [-pi, pi]
+        direction = (direction + math.pi) % (2 * math.pi) - math.pi
+        return direction
+
+
     def _observation_pos(self, agent, other_agent):
         if not self.use_polar_coordinate:
             return (other_agent.loc_x - agent.loc_x), (
                     other_agent.loc_y - agent.loc_y)
         else:
-            dist = ComputeDistance(agent, other_agent)
-            direction = ComputeAngle(agent, other_agent)
+            dist = self.compute_distance(agent, other_agent)
+            direction = self.compute_angle(agent, other_agent)
             return dist, direction
 
     def _generate_observation(self, agent):
@@ -235,8 +264,8 @@ class Particle2dEnvironment(MultiAgentEnv):
         other_agents = [
             other_agent for other_agent in self.agents
             if other_agent is not agent and other_agent.still_in_game == 1
-               and abs(ComputeAngle(agent, other_agent)) < self.max_seeing_angle
-               and ComputeDistance(agent, other_agent) < self.max_seeing_distance
+               and abs(self.compute_angle(agent, other_agent)) < self.max_seeing_angle
+               and self.compute_distance(agent, other_agent) < self.max_seeing_distance
         ]
         # keep only the closest agents
         other_agents = other_agents[:self.num_other_agents_observed]
@@ -244,7 +273,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         # Observation of the other agents
         if self.sort_by_distance:
             # Sort the agents by distance
-            other_agents = sorted(other_agents, key=lambda other_agent: ComputeDistance(agent, other_agent))
+            other_agents = sorted(other_agents, key=lambda other_agent: self.compute_distance(agent, other_agent))
 
         for j, other in enumerate(other_agents):
             # count the number of already observed properties
@@ -444,24 +473,24 @@ class Particle2dEnvironment(MultiAgentEnv):
                 agent.loc_x += agent.speed_x * dt
                 agent.loc_y += agent.speed_y * dt
 
-                # limit the location to the stage size and set speed to 0 in the direction
-                if agent.loc_x < agent.radius / 2:
-                    agent.loc_x = agent.radius
-                    agent.speed_x = 0
-                elif agent.loc_x > self.stage_size - agent.radius / 2:
-                    agent.loc_x = self.stage_size - agent.radius
-                    agent.speed_x = 0
-                if agent.loc_y < agent.radius / 2:
-                    agent.loc_y = agent.radius
-                    agent.speed_y = 0
-                elif agent.loc_y > self.stage_size - agent.radius / 2:
-                    agent.loc_y = self.stage_size - agent.radius
-                    agent.speed_y = 0
-
                 # periodic boundary
                 if self.periodical_boundary:
                     agent.loc_x = agent.loc_x % self.stage_size
                     agent.loc_y = agent.loc_y % self.stage_size
+                else:
+                    # limit the location to the stage size and set speed to 0 in the direction
+                    if agent.loc_x < agent.radius / 2:
+                        agent.loc_x = agent.radius
+                        agent.speed_x = 0
+                    elif agent.loc_x > self.stage_size - agent.radius / 2:
+                        agent.loc_x = self.stage_size - agent.radius
+                        agent.speed_x = 0
+                    if agent.loc_y < agent.radius / 2:
+                        agent.loc_y = agent.radius
+                        agent.speed_y = 0
+                    elif agent.loc_y > self.stage_size - agent.radius / 2:
+                        agent.loc_y = self.stage_size - agent.radius
+                        agent.speed_y = 0
 
         return eating_events
 
