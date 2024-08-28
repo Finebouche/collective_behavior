@@ -9,6 +9,9 @@ from ray.rllib.env.env_context import EnvContext
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from metrics import calculate_dos, calculate_doa
 
+import wandb
+import pygame
+
 
 def sign(x):
     if x == 0:
@@ -229,7 +232,6 @@ class Particle2dEnvironment(MultiAgentEnv):
         direction = (direction + math.pi) % (2 * math.pi) - math.pi
         return direction
 
-
     def _observation_pos(self, agent, other_agent):
         if not self.use_polar_coordinate:
             return (other_agent.loc_x - agent.loc_x), (
@@ -365,16 +367,15 @@ class Particle2dEnvironment(MultiAgentEnv):
         contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.agents}
         for agent_a in self.agents:
             for agent_b in self.agents:
-                if agent_a.agent_id < agent_b.agent_id:  # Avoid double-checking and self-checking
-                    continue
                 if agent_a.still_in_game == 0 or agent_b.still_in_game == 0:
                     continue
-                    
+                if agent_a.agent_id < agent_b.agent_id:  # Avoid double-checking and self-checking
+                    continue
+
                 delta_x = agent_a.loc_x - agent_b.loc_x
                 delta_y = agent_a.loc_y - agent_b.loc_y
                 dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
                 dist_min = agent_a.radius + agent_b.radius
-
 
                 if dist < dist_min:  # There's a collision
                     if agent_a.agent_type != agent_b.agent_type:
@@ -502,8 +503,6 @@ class Particle2dEnvironment(MultiAgentEnv):
         # Initialize rewards
         reward_list = {agent.agent_id: 0 for agent in self.agents}
 
-        predator_agents = [other_agent for other_agent in self.agents if other_agent.agent_type == 1]
-
         for event in all_eating_events:
             predator_id, prey_id = event["predator_id"], event["prey_id"]
             # Apply the eating reward for the predator and the death penalty for the prey
@@ -555,31 +554,82 @@ class Particle2dEnvironment(MultiAgentEnv):
         # Natural ending
         # is True where the prey is eaten (agent.still_in_game == 0)
         # or when episode ends because all preys have been eaten (self.num_preys == 0)
-        terminated = {agent.agent_id: self.num_preys == 0 or agent.still_in_game == 0 for agent in self.agents}
-        terminated['__all__'] = self.num_preys == 0
+        terminated = {
+            agent.agent_id: self.num_preys == 0 or self.timestep >= self.episode_length or agent.still_in_game == 0 for
+            agent in self.agents}
+        terminated['__all__'] = self.num_preys == 0 or self.timestep >= self.episode_length
         # Premature ending (because of time limit)
         truncated = {agent.agent_id: self.timestep >= self.episode_length for agent in self.agents}
         truncated['__all__'] = self.timestep >= self.episode_length
 
         return terminated, truncated
 
+    def render(self, render_mode="rgb_array"):
+        if render_mode == "rgb_array":
+            predator_color = pygame.Color("#C843C3")
+            prey_color = pygame.Color("#245EB6")
+            fig_size = 6
+
+            canvas = pygame.Surface((fig_size, fig_size))
+            canvas.fill((255, 255, 255))
+
+            # Calculating the pixel square size
+            pix_square_size = fig_size / self.stage_size
+
+            # Drawing the agents
+            for agent in self.agents:
+                if agent.still_in_game == 1:
+                    agent_pos = (agent.loc_x + 0.5) * pix_square_size, (agent.loc_y + 0.5) * pix_square_size
+                    agent_size = agent.radius * pix_square_size
+                    if agent.agent_type == 'prey':
+                        pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
+                    else:
+                        pygame.draw.circle(canvas, predator_color, agent_pos, agent_size)
+
+            # Adding gridlines
+            for x in range(self.stage_size + 1):
+                pygame.draw.line(canvas, 0, (0, pix_square_size * x), (fig_size, pix_square_size * x), width=3)
+                pygame.draw.line(canvas, 0, (pix_square_size * x, 0), (pix_square_size * x, fig_size), width=3)
+
+            return np.transpose(
+                np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
+            )
+
 
 class MetricsCallbacks(DefaultCallbacks):
-    def on_episode_start(self, worker, base_env, policies, episode, **kwargs):
+    def on_episode_start(self, *, episode, **kwargs):
         # Initialize sum of DoS for the episode
         episode.user_data['dos'] = []
         episode.user_data['doa'] = []
 
-    def on_episode_step(self, worker, base_env, policies, episode, **kwargs):
+    #  episode, env_runner, metrics_logger, env, env_index, rl_module, worker,base_env, policies,
+    # worker,base_env, policies,
+    def on_episode_step(self, *, episode, **kwargs):
         # Assuming you can extract loc_x and loc_y from the episode
         info = episode.last_info_for("__common__")
         episode.user_data["dos"].append(info["dos"])
         episode.user_data["doa"].append(info["doa"])
 
-    def on_episode_end(self, worker, base_env, policies, episode, **kwargs):
+    def on_episode_end(self, *, episode, **kwargs):
         # Average DoS at the end of episode
         info = episode.last_info_for("__common__")
         average_dos = sum(episode.user_data['dos']) / info["timestep"]
         average_doa = sum(episode.user_data['doa']) / info["timestep"]
         episode.custom_metrics['dos'] = average_dos
         episode.custom_metrics['doa'] = average_doa
+
+
+class RenderingCallbacks(DefaultCallbacks):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.frames = []
+
+    def on_episode_step(self, *, env, **kwargs):
+        frame = env.envs[0].render(render_mode="rgb_array")
+        self.frames.append(frame)
+
+    def on_episode_end(self, *, episode, **kwargs):
+        if self.frames:
+            vid = np.transpose(np.array(self.frames), (0, 3, 1, 2))
+            episode.media["rendering"] = wandb.Video(vid, fps=30, format="mp4")
+            self.frames = []
