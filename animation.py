@@ -16,14 +16,11 @@ def generate_animation_3d(
         predator_color="#C843C3",
         prey_color="#245EB6",
         runner_not_in_game_color="#666666",
-        fig_width=6,
-        fig_height=6,
+        fig_size=6,
 ):
     assert isinstance(episode_states, dict)
 
-    fig, ax = plt.subplots(
-        1, 1, figsize=(fig_width, fig_height)
-    )  # , constrained_layout=True
+    fig, ax = plt.subplots(1, 1, figsize=(fig_size, fig_size))
     ax.remove()
     ax = fig.add_subplot(1, 1, 1, projection="3d")
 
@@ -68,7 +65,7 @@ def generate_animation_3d(
                 [0],
                 color=prey_color,
                 marker='o',
-                markersize=env.prey_radius * fig.dpi * fig_height / env.stage_size,
+                markersize=env.prey_radius * fig.dpi * fig_size / env.stage_size,
             )
         else:  # predators
             lines[idx], = ax.plot(
@@ -77,7 +74,7 @@ def generate_animation_3d(
                 [0],
                 color=predator_color,
                 marker='o',
-                markersize=env.predator_radius * fig.dpi * fig_height / env.stage_size,
+                markersize=env.predator_radius * fig.dpi * fig_size / env.stage_size,
             )
         trail_lines[idx], = ax.plot(
             [episode_states["loc_x"][:1, idx], episode_states["loc_x"][:1, idx]],
