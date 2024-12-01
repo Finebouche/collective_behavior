@@ -1,78 +1,111 @@
-# Reinforcement Learning with Ray RLlib
+<p align="center">
+    <img src="collective_behavior.png" align="center" width="30%">
+</p>
+<p align="center"><h1 align="center">COLLECTIVE_BEHAVIOR</h1></p>
+<p align="center">
+	<em>Unleashing Dynamics in Multi-Agent Simulations</em>
+</p>
+<p align="center">
+	<img src="https://img.shields.io/github/license/Finebouche/collective_behavior?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
+	<img src="https://img.shields.io/github/last-commit/Finebouche/collective_behavior?style=default&logo=git&logoColor=white&color=0080ff" alt="last-commit">
+	<img src="https://img.shields.io/github/languages/top/Finebouche/collective_behavior?style=default&color=0080ff" alt="repo-top-language">
+	<img src="https://img.shields.io/github/languages/count/Finebouche/collective_behavior?style=default&color=0080ff" alt="repo-language-count">
+</p>
+<p align="center"><!-- default option, no dependency badges. -->
+</p>
+<p align="center">
+	<!-- default option, no dependency badges. -->
+</p>
+<br>
 
-This repository contains the implementation of a multi-agent reinforcement learning (RL) scenario using Ray's RLlib. It uses Proximal Policy Optimization (PPO) as the RL algorithm and enables training and experimentation with different configurations.
+## 🔗 Table of Contents
+
+- [📍 Overview](#-overview)
+- [👾 Features](#-features)
+- [📁 Project Structure](#-project-structure)
+  - [📂 Project Index](#-project-index)
+- [🚀 Getting Started](#-getting-started)
+  - [☑️ Prerequisites](#-prerequisites)
+  - [⚙️ Installation](#-installation)
+  - [🤖 Usage](#🤖-usage)
+  - [🧪 Testing](#🧪-testing)
+- [📌 Project Roadmap](#-project-roadmap)
+- [🔰 Contributing](#-contributing)
+- [🎗 License](#-license)
+- [🙌 Acknowledgments](#-acknowledgments)
+
+---
+
+## 📍 Overview
+
+The collectivebehavior project addresses the challenge of understanding and simulating multi-agent dynamics, such as predator-prey interactions. It offers customizable simulations, detailed metrics, and engaging visualizations to analyze agent behavior and interactions. Ideal for researchers and developers in AI and behavioral sciences, it supports experimentation and performance tracking, enhancing insights into collective dynamics.
+
+---
+
+## 👾 Features
+
+|      |     Feature      | Summary       |
+| :--- |:----------------:| :---          |
+| ⚙️  | **Architecture** | <ul><li>Utilizes a multi-agent simulation framework leveraging `<Ray RLlib>` for reinforcement learning.</li><li>Incorporates a 2D particle-based environment for agent interactions, defined in [`particle_2d_env.py`](#).</li><li>Supports customizable and repeatable simulation scenarios through configuration settings in [`config.py`](#).</li></ul> |
+| 🔌 |  **Monitoring**  | <ul><li>Seamless integration with `<Weights & Biases>` for experiment tracking and visualization.</li><li>Utilizes `<JupyterLab>` for interactive development and analysis.</li><li>Supports visualization tools like `<Pygame>` for rendering simulations.</li></ul> |
+| 🧩 |  **Modularity**  | <ul><li>Encapsulates agent behaviors and properties in the `ParticuleAgent` class.</li><li>Modular design allows for easy extension and modification of simulation parameters.</li><li>Separate modules for metrics, configuration, and visualization enhance maintainability.</li></ul> |
+| ⚡️  | **Performance**  | <ul><li>Efficient simulation of multi-agent environments using vectorized operations.</li><li>Leverages `<Ray>` for distributed computing and scalability.</li><li>Optimized for performance with tools like `<NumPy>` and `<PyTorch>`.</li></ul> |
+---
 
 
-# Setup
+## Setup
 
-## Clone this repo
+### ☑️ Prerequisites
 
-Use the way you prefer.
+Before getting started with collective_behavior, ensure your runtime environment meets the following requirements:
 
+- **Programming Language:** Python
+- **Package Manager:** Conda
+
+
+### ⚙️ Installation
+
+Install collective_behavior using one of the following methods:
+
+**Build from source:**
+
+1. Clone the collective_behavior repository:
 ```sh
-git clone https://github.com/Finebouche/collective_behavior.git
+❯ git clone https://github.com/Finebouche/collective_behavior
 ```
 
-## Configure Conda Environment
-To install the dependencies, you should create a Conda environment. If you haven’t installed Conda, please follow the [official installation guide](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Once you have Conda installed, you can create an environment using the following command:
-
+2. Navigate to the project directory:
 ```sh
-mamba env create -n <env-name> -f environment.yml
+❯ cd collective_behavior
 ```
 
-Replace ```<env_name>``` with the name you wish to give to the environment.
-Activating the Conda Environment
-
-### Dependencies
-This project depends on the Ray library for distributed computing, along with its RLlib for reinforcement learning.
+3. Install the project dependencies:
 
 
-To activate the created Conda environment, use the command below:
+**Using `conda`** &nbsp; [<img align="center" src="https://img.shields.io/badge/conda-342B029.svg?style={badge_style}&logo=anaconda&logoColor=white" />](https://docs.conda.io/)
 
 ```sh
-conda activate <env_name>
+❯ conda env create -f environment.yml
 ```
 
-Replace ```<env_name>``` with the name of your environment.
 
+---
+## 📌 Project Roadmap
 
-# Code Overview
+- [X] **`Task 1`**: <strike>Implement feature one.</strike>
+- [ ] **`Task 2`**: Implement feature two.
+- [ ] **`Task 3`**: Implement feature three.
 
-The provided code is structured as follows:
+---
 
-    custom_env.py includes the implementation of the custom environment.
-    config.py contains various configurations for running the experiment.
-    The main script initializes Ray, configures and runs the PPO algorithm, and handles multi-agent scenarios.
+## 🎗 License
 
-## Args Class
+This project is protected under the [SELECT-A-LICENSE](https://choosealicense.com/licenses) License. For more details, refer to the [LICENSE](https://choosealicense.com/licenses/) file.
 
-This class initializes the parameters used for running the RL algorithm:
+---
 
-    run: Specifies the RL algorithm to be used. Here, it's PPO.
-    framework: Indicates the deep learning framework to be used, either "tf2" or "torch". Here, it's "torch".
-    stop_iters, stop_timesteps, and stop_reward: Stop the training iterations, time steps, and reward, respectively.
+## 🙌 Acknowledgments
 
-## Custom Environment and Configuration
+- List any resources, contributors, inspiration, etc. here.
 
-The custom_env.py file should define the custom environment class CustomEnvironment and config.py should contain the run_config configuration dict which will be used when initializing the environment instance.
-## Multi-Agent Configuration
-
-The script supports multi-agent configurations, specifically "prey" and "predator". The policy_mapping_fn determines the policy for each agent based on the agent_type.
-## Resource Allocation
-
-The resources used by Ray, like GPUs, CPUs per worker, etc., are configured in the resources section of the config object.
-
-### Note
-
-Ensure that your machine has the required resources, like GPUs and CPUs, as configured in the script.
-
-## Training and Rollouts
-
-The training parameters like the number of SGD iterations, minibatch size, etc., are configured, as are the rollout parameters like fragment length, batch mode, and the number of rollout workers.
-Checkpointing
-
-The model’s native files are exported during checkpointing.
-
-## Integration with Weights & Biases
-
-The script also includes integration with Weights & Biases (W&B) for experiment logging through WandbLoggerCallback.
+---

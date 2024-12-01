@@ -353,7 +353,8 @@ class Particle2dEnvironment(MultiAgentEnv):
         else:
             dos = 0
             doa = 0
-        infos = {"__common__": {"dos": dos, "doa": doa, "timestep": self.timestep}}
+
+        infos = {"__common__": {"dos": dos, "doa": doa, "frame": self.render(render_mode="rgb_array"), "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
 
@@ -568,7 +569,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         if render_mode == "rgb_array":
             predator_color = pygame.Color("#C843C3")
             prey_color = pygame.Color("#245EB6")
-            fig_size = 6
+            fig_size = 512
 
             canvas = pygame.Surface((fig_size, fig_size))
             canvas.fill((255, 255, 255))
@@ -585,11 +586,6 @@ class Particle2dEnvironment(MultiAgentEnv):
                         pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
                     else:
                         pygame.draw.circle(canvas, predator_color, agent_pos, agent_size)
-
-            # Adding gridlines
-            for x in range(self.stage_size + 1):
-                pygame.draw.line(canvas, 0, (0, pix_square_size * x), (fig_size, pix_square_size * x), width=3)
-                pygame.draw.line(canvas, 0, (pix_square_size * x, 0), (pix_square_size * x, fig_size), width=3)
 
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
@@ -624,12 +620,16 @@ class RenderingCallbacks(DefaultCallbacks):
         super().__init__(*args, **kwargs)
         self.frames = []
 
-    def on_episode_step(self, *, env, **kwargs):
-        frame = env.envs[0].render(render_mode="rgb_array")
-        self.frames.append(frame)
+    def on_episode_step(self, *, episode, env_index, **kwargs):
+        if env_index == 0:
+            info = episode.last_info_for("__common__")
+            frame = info['frame']
+            self.frames.append(frame)
 
     def on_episode_end(self, *, episode, **kwargs):
         if self.frames:
             vid = np.transpose(np.array(self.frames), (0, 3, 1, 2))
-            episode.media["rendering"] = wandb.Video(vid, fps=30, format="mp4")
+            # save the 4D numpy array as a gif
+            # imageio.mimsave("video.gif", np.array(self.frames), fps=10)
+            episode.media["rendering"] = wandb.Video(vid, fps=30, format="gif")
             self.frames = []
