@@ -91,18 +91,16 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.max_speed_prey = config.get('max_speed_prey')
         self.max_speed_predator = config.get('max_speed_predator')
 
+        self.prey_consumed = config.get('prey_consumed')
+
         # AGENTS (PREYS AND PREDATORS)
         # random number of preys
-        ini_num_preys = config.get('num_preys')
-        self.ini_num_preys, self.max_num_preys = random_int_in_interval(ini_num_preys)
+        self.ini_num_preys, self.max_num_preys = random_int_in_interval(config.get('num_preys'))
         self.num_preys = self.ini_num_preys
         # random number of predators
-        num_predators = config.get('num_predators')
-        self.num_predators, self.max_num_predators = random_int_in_interval(num_predators)
+        self.num_predators, self.max_num_predators = random_int_in_interval(config.get('num_predators'))
         assert self.num_preys > 0
         assert self.num_predators >= 0
-        self.num_agents = self.num_preys + self.num_predators
-        self.max_num_agents = self.max_num_preys + self.max_num_predators
 
         self.prey_radius = config.get('prey_radius')
         self.predator_radius = config.get('predator_radius')
@@ -112,7 +110,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.agent_density = config.get('agent_density')
         assert 0 < self.agent_density
 
-        self.agents = []
+        self.particule_agents = []
         for i in range(self.max_num_agents):
             if i < self.num_agents:
                 if i < self.num_preys:
@@ -122,10 +120,12 @@ class Particle2dEnvironment(MultiAgentEnv):
                 still_in_game = 1
             else:
                 agent_type, radius, still_in_game = None, None, 0
-            self.agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
+            self.particule_agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
-        self._agent_ids = {agent.agent_id for agent in self.agents}  # Used by RLlib
-        self.prey_consumed = config.get('prey_consumed')
+
+        self.agents = [agent.agent_id for agent in self.particule_agents if agent.still_in_game == 1]
+        self.possible_agents = [agent.agent_id for agent in self.particule_agents]
+        self._agent_ids = {agent.agent_id for agent in self.particule_agents}  # Used by RLlib
 
         # ACTIONS (ACCELERATION AND TURN)
         self.max_acceleration_prey = config.get('max_acceleration_prey')
@@ -138,7 +138,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 high=np.array([1, -1]),  # this gets multiplied later
                 dtype=self.float_dtype,
                 shape=(2,)
-            ) for agent in self.agents
+            ) for agent in self.particule_agents
         })
 
         # OBSERVATION SETTINGS
@@ -149,8 +149,6 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.max_seeing_distance = config.get('max_seeing_distance')
         if not 0 < self.max_seeing_distance <= self.grid_diagonal:
             self.max_seeing_distance = self.grid_diagonal
-
-        self.sort_by_distance = config.get('sort_by_distance')
 
         self.num_other_agents_observed = config.get('num_other_agents_observed')
         if not 0 < self.num_other_agents_observed <= self.num_agents - 1 or self.num_other_agents_observed == "all":
@@ -172,7 +170,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 high=np.inf,
                 dtype=self.float_dtype,
                 shape=(self.observation_size,)
-            ) for agent in self.agents
+            ) for agent in self.particule_agents
         })
 
         # REWARDS
@@ -184,6 +182,15 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.collective_death_penalty_for_prey = config.get('collective_death_penalty_for_prey')
         self.edge_hit_penalty = config.get('edge_hit_penalty')
         self.energy_cost_penalty_coef = config.get('energy_cost_penalty_coef')
+
+
+    @property
+    def num_agents(self):
+        return self.num_preys + self.num_predators
+
+    @property
+    def max_num_agents(self):
+        return self.max_num_preys + self.max_num_predators
 
     def compute_distance(self, agent1, agent2):
         if self.periodical_boundary:
@@ -264,18 +271,15 @@ class Particle2dEnvironment(MultiAgentEnv):
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
         other_agents = [
-            other_agent for other_agent in self.agents
+            other_agent for other_agent in self.particule_agents
             if other_agent is not agent and other_agent.still_in_game == 1
                and abs(self.compute_angle(agent, other_agent)) < self.max_seeing_angle
                and self.compute_distance(agent, other_agent) < self.max_seeing_distance
         ]
+
+        other_agents = sorted(other_agents, key=lambda other_agent: self.compute_distance(agent, other_agent))
         # keep only the closest agents
         other_agents = other_agents[:self.num_other_agents_observed]
-
-        # Observation of the other agents
-        if self.sort_by_distance:
-            # Sort the agents by distance
-            other_agents = sorted(other_agents, key=lambda other_agent: self.compute_distance(agent, other_agent))
 
         for j, other in enumerate(other_agents):
             # count the number of already observed properties
@@ -301,7 +305,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         return obs
 
     def _get_observation_dict(self):
-        return {agent.agent_id: self._generate_observation(agent) for agent in self.agents if agent.still_in_game == 1}
+        return {agent.agent_id: self._generate_observation(agent) for agent in self.particule_agents if agent.still_in_game == 1}
 
     def reset(self, seed=None, options=None):
         # Reset time to the beginning
@@ -309,14 +313,14 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.num_preys = self.ini_num_preys
 
         # Vectorized operations for random values
-        # len(self.agents) can be bigger than self.num_agents
-        random_values = self.np_random.random(size=(len(self.agents), 3))
+        # len(self.particule_agents) can be bigger than self.num_agents
+        random_values = self.np_random.random(size=(len(self.particule_agents), 3))
         loc_x = random_values[:, 0] * self.stage_size
         loc_y = random_values[:, 1] * self.stage_size
         headings = random_values[:, 2] * 2 * np.pi
 
         # Assigning the vectorized values to agents
-        for i, agent in enumerate(self.agents):
+        for i, agent in enumerate(self.particule_agents):
             if i < self.num_agents:
                 agent.loc_x, agent.loc_y = loc_x[i], loc_y[i]
                 agent.speed_x, agent.speed_y = 0.0, 0.0
@@ -345,9 +349,9 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # get array of locations for each agent
         if self.num_preys > 0:
-            loc_x = [agent.loc_x for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            loc_y = [agent.loc_y for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            heading = [agent.heading for agent in self.agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            loc_x = [agent.loc_x for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            loc_y = [agent.loc_y for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+            heading = [agent.heading for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
             dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
             doa = calculate_doa(heading) / (self.num_preys * 2 * np.pi)
         else:
@@ -365,9 +369,9 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # BUMP INTO OTHER AGENTS
         eating_events = []
-        contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.agents}
-        for agent_a in self.agents:
-            for agent_b in self.agents:
+        contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.particule_agents}
+        for agent_a in self.particule_agents:
+            for agent_b in self.particule_agents:
                 if agent_a.still_in_game == 0 or agent_b.still_in_game == 0:
                     continue
                 if agent_a.agent_id < agent_b.agent_id:  # Avoid double-checking and self-checking
@@ -383,12 +387,11 @@ class Particle2dEnvironment(MultiAgentEnv):
                         prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (
                             agent_b, agent_a)
                         eating_events.append({"predator_id": predator_agent.agent_id, "prey_id": prey_agent.agent_id})
+
+                        # No bouncing if the prey is already consumed therefore we skip the contact force
                         if self.prey_consumed:
-                            prey_agent.still_in_game = 0
-                            self.num_preys -= 1
                             continue
-                    if agent_a.agent_type != agent_b.agent_type and self.prey_consumed:
-                        print("this should never happend, because of continue")
+
                     k = self.contact_margin  # This is defined in config
                     penetration = np.logaddexp(0, -(dist - dist_min) / k) * k
                     force_magnitude = self.contact_force_coefficient * penetration  # This is defined in config
@@ -403,7 +406,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                     contact_force_dict[agent_a.agent_id] += force
                     contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
 
-        for agent in self.agents:
+        for agent in self.particule_agents:
             if agent.still_in_game == 1:
                 # DRAGGING FORCE
                 # Calculate the speed magnitude
@@ -502,26 +505,32 @@ class Particle2dEnvironment(MultiAgentEnv):
 
     def _get_reward(self, action_list, all_eating_events):
         # Initialize rewards
-        reward_list = {agent.agent_id: 0 for agent in self.agents}
+        reward_dict = {agent.agent_id: 0 for agent in self.particule_agents if agent.still_in_game == 1}
 
         for event in all_eating_events:
             predator_id, prey_id = event["predator_id"], event["prey_id"]
             # Apply the eating reward for the predator and the death penalty for the prey
-            reward_list[predator_id] += self.eating_reward_for_predator
-            reward_list[prey_id] += self.death_penalty_for_prey
-            # collective penalty for preys
-            for agent in self.agents:
-                if agent.agent_type == 0 and agent.still_in_game == 1:  # Prey
-                    reward_list[agent.agent_id] += self.collective_death_penalty_for_prey
-                elif agent.agent_type == 1:  # Predator
-                    reward_list[agent.agent_id] += self.collective_eating_reward_for_predator
+            reward_dict[predator_id] += self.eating_reward_for_predator
+            reward_dict[prey_id] += self.death_penalty_for_prey
+            self.num_preys -= 1
+            # find the prey in particule_agents and set still_in_game to 0
+            for agent in self.particule_agents:
+                if agent.agent_id == prey_id:
+                    agent.still_in_game = 0
 
-        for agent in self.agents:
+            # collective penalty for preys
+            for agent in self.particule_agents:
+                if agent.agent_type == 0 and agent.still_in_game == 1:  # Prey
+                    reward_dict[agent.agent_id] += self.collective_death_penalty_for_prey
+                elif agent.agent_type == 1:  # Predator
+                    reward_dict[agent.agent_id] += self.collective_eating_reward_for_predator
+
+        for agent in self.particule_agents:
             if agent.still_in_game:
                 if agent.agent_type == 0:  # 0 for prey, is_prey
-                    reward_list[agent.agent_id] += self.surviving_reward_for_prey
+                    reward_dict[agent.agent_id] += self.surviving_reward_for_prey
                 else:  # is_predator
-                    reward_list[agent.agent_id] += self.starving_penalty_for_predator
+                    reward_dict[agent.agent_id] += self.starving_penalty_for_predator
 
                 # ENERGY EFFICIENCY
                 # Add the energy efficiency penalty
@@ -532,7 +541,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                     energy_cost_penalty = -(
                             abs(self_force_amplitude) + abs(self_force_orientation)
                     ) * self.energy_cost_penalty_coef
-                    reward_list[agent.agent_id] += energy_cost_penalty
+                    reward_dict[agent.agent_id] += energy_cost_penalty
 
                 # WALL avoidance
                 # Check if the agent is touching the edge
@@ -547,9 +556,9 @@ class Particle2dEnvironment(MultiAgentEnv):
                     )
 
                     if is_touching_edge_x or is_touching_edge_y:
-                        reward_list[agent.agent_id] += self.edge_hit_penalty
+                        reward_dict[agent.agent_id] += self.edge_hit_penalty
 
-        return reward_list
+        return reward_dict
 
     def _get_done(self):
         # Natural ending
@@ -557,10 +566,10 @@ class Particle2dEnvironment(MultiAgentEnv):
         # or when episode ends because all preys have been eaten (self.num_preys == 0)
         terminated = {
             agent.agent_id: self.num_preys == 0 or self.timestep >= self.episode_length or agent.still_in_game == 0 for
-            agent in self.agents}
+            agent in self.particule_agents}
         terminated['__all__'] = self.num_preys == 0 or self.timestep >= self.episode_length
         # Premature ending (because of time limit)
-        truncated = {agent.agent_id: self.timestep >= self.episode_length for agent in self.agents}
+        truncated = {agent.agent_id: self.timestep >= self.episode_length for agent in self.particule_agents}
         truncated['__all__'] = self.timestep >= self.episode_length
 
         return terminated, truncated
@@ -578,7 +587,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             pix_square_size = fig_size / self.stage_size
 
             # Drawing the agents
-            for agent in self.agents:
+            for agent in self.particule_agents:
                 if agent.still_in_game == 1:
                     agent_pos = (agent.loc_x + 0.5) * pix_square_size, (agent.loc_y + 0.5) * pix_square_size
                     agent_size = agent.radius * pix_square_size

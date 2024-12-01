@@ -21,16 +21,12 @@
 ## 🔗 Table of Contents
 
 - [📍 Overview](#-overview)
-- [👾 Features](#-features)
-- [📁 Project Structure](#-project-structure)
-  - [📂 Project Index](#-project-index)
-- [🚀 Getting Started](#-getting-started)
+- [🚀 Setup](#-getting-started)
   - [☑️ Prerequisites](#-prerequisites)
   - [⚙️ Installation](#-installation)
   - [🤖 Usage](#🤖-usage)
   - [🧪 Testing](#🧪-testing)
 - [📌 Project Roadmap](#-project-roadmap)
-- [🔰 Contributing](#-contributing)
 - [🎗 License](#-license)
 - [🙌 Acknowledgments](#-acknowledgments)
 
@@ -41,8 +37,6 @@
 The collectivebehavior project addresses the challenge of understanding and simulating multi-agent dynamics, such as predator-prey interactions. It offers customizable simulations, detailed metrics, and engaging visualizations to analyze agent behavior and interactions. Ideal for researchers and developers in AI and behavioral sciences, it supports experimentation and performance tracking, enhancing insights into collective dynamics.
 
 ---
-
-## 👾 Features
 
 |      |     Feature      | Summary       |
 | :--- |:----------------:| :---          |
@@ -88,6 +82,21 @@ Install collective_behavior using one of the following methods:
 ❯ conda env create -f environment.yml
 ```
 
+4. Register the environment as jupyter kernel:
+```sh
+❯ python -m ipykernel install --user --name collective_behavior
+```
+
+5. Specify you wandb API key in  wandb_api_key.txt file
+
+6. Activate the conda environment:
+```sh
+❯ conda activate collective_behavior
+```
+7. Start JupyterLab:
+```sh
+❯ jupyter lab
+```
 
 ---
 ## 📌 Project Roadmap
