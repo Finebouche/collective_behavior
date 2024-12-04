@@ -1,15 +1,14 @@
 <p align="center">
-    <img src="collective_behavior.png" align="center" width="30%">
+    <img src="collective_behavior.png" align="center" width="70%">
 </p>
-<p align="center"><h1 align="center">COLLECTIVE_BEHAVIOR</h1></p>
+<p align="center"><h1 align="center">EMERGENT COLLECTIVE BEHAVIOR</h1></p>
 <p align="center">
-	<em>Unleashing Dynamics in Multi-Agent Simulations</em>
+	<em>Exploring the Emergence of Confusion in Collective behavior through Reinforcement Learning Simulation</em>
 </p>
 <p align="center">
-	<img src="https://img.shields.io/github/license/Finebouche/collective_behavior?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/github/last-commit/Finebouche/collective_behavior?style=default&logo=git&logoColor=white&color=0080ff" alt="last-commit">
+	<img src="https://img.shields.io/github/license/Finebouche/collective_behavior" alt="license">
+	<img src="https://img.shields.io/github/last-commit/Finebouche/collective_behavior" alt="last-commit">
 	<img src="https://img.shields.io/github/languages/top/Finebouche/collective_behavior?style=default&color=0080ff" alt="repo-top-language">
-	<img src="https://img.shields.io/github/languages/count/Finebouche/collective_behavior?style=default&color=0080ff" alt="repo-language-count">
 </p>
 <p align="center"><!-- default option, no dependency badges. -->
 </p>
@@ -31,16 +30,22 @@
 
 ## 📍 Overview
 
-The collectivebehavior project addresses the challenge of understanding and simulating multi-agent dynamics, such as predator-prey interactions. It offers customizable simulations, detailed metrics, and engaging visualizations to analyze agent behavior and interactions. Ideal for researchers and developers in AI and behavioral sciences, it supports experimentation and performance tracking, enhancing insights into collective dynamics.
+This project delves into the fascinating dynamics of animal collective behavior, exploring how confusion and order emerge in multi-agent systems. Using Reinforcement Learning (RL) powered by Ray RLlib, the simulation provides a framework for studying realistic interactions between agents in a 2D environment. With a focus on physics realism and behavioral analysis, the project enables researchers to simulate and study behaviors such as predator-prey dynamics, flocking, or swarming, bridging the gap between biological studies and AI-driven insights.
 
 ---
+*	Switchable Optimization Algorithms: Effortlessly toggle between various RL optimization algorithms to test and analyze behaviors.
+*	Realistic Physics: Incorporates particle-based physics to model agent movement and interactions accurately.
+*	Behavioral Insights: Focus on metrics and visualizations that reveal emergent patterns and their implications in collective dynamics.
 
-|      |     Feature      | Summary       |
-| :--- |:----------------:| :---          |
-| ⚙️  | **Architecture** | <ul><li>Utilizes a multi-agent simulation framework leveraging `<Ray RLlib>` for reinforcement learning.</li><li>Incorporates a 2D particle-based environment for agent interactions, defined in [`particle_2d_env.py`](#).</li><li>Supports customizable and repeatable simulation scenarios through configuration settings in [`config.py`](#).</li></ul> |
-| 🔌 |  **Monitoring**  | <ul><li>Seamless integration with `<Weights & Biases>` for experiment tracking and visualization.</li><li>Utilizes `<JupyterLab>` for interactive development and analysis.</li><li>Supports visualization tools like `<Pygame>` for rendering simulations.</li></ul> |
-| 🧩 |  **Modularity**  | <ul><li>Encapsulates agent behaviors and properties in the `ParticuleAgent` class.</li><li>Modular design allows for easy extension and modification of simulation parameters.</li><li>Separate modules for metrics, configuration, and visualization enhance maintainability.</li></ul> |
-| ⚡️  | **Performance**  | <ul><li>Efficient simulation of multi-agent environments using vectorized operations.</li><li>Leverages `<Ray>` for distributed computing and scalability.</li><li>Optimized for performance with tools like `<NumPy>` and `<PyTorch>`.</li></ul> |
+---
+## 🛠 Key Features
+
+|    |      Feature      | Summary                                                                                                                                                                                                                                                                                  |
+|:---|:-----------------:|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 🧪 | **Architecture**  | Leverages Ray RLlib for multi-agent reinforcement learning simulations.Interactive 2D environment for physics-based agent interactions, implemented in particle_2d_env.py.Highly configurable scenarios via config.py for flexible experimentation.                                                                                                                                                                                                                                                                                         |
+| 🩻 | **Visualization** | Real-time visualizations using Pygame, making simulations engaging and accessible.Seamless tracking and analysis through Weights & Biases integration.Interactive data exploration with JupyterLab notebooks.                    |
+| 🧩 |  **Modularity**   | Encapsulated behaviors in ParticleAgent class for extensibility.Independent modules for metrics, configuration, and visualization to maintain clean architecture.Easy-to-adapt structure for new scenarios or agent types. |
+| ⚡️ |  **Performance**  | Optimized multi-agent simulations with vectorized operations for scalable performance.                                                                                                                                                                                          |
 ---
 
 
