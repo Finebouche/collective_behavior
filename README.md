@@ -24,9 +24,6 @@
 - [🚀 Setup](#-getting-started)
   - [☑️ Prerequisites](#-prerequisites)
   - [⚙️ Installation](#-installation)
-  - [🤖 Usage](#🤖-usage)
-  - [🧪 Testing](#🧪-testing)
-- [📌 Project Roadmap](#-project-roadmap)
 - [🎗 License](#-license)
 - [🙌 Acknowledgments](#-acknowledgments)
 
@@ -99,17 +96,11 @@ Install collective_behavior using one of the following methods:
 ```
 
 ---
-## 📌 Project Roadmap
 
-- [X] **`Task 1`**: <strike>Implement feature one.</strike>
-- [ ] **`Task 2`**: Implement feature two.
-- [ ] **`Task 3`**: Implement feature three.
-
----
 
 ## 🎗 License
 
-This project is protected under the [SELECT-A-LICENSE](https://choosealicense.com/licenses) License. For more details, refer to the [LICENSE](https://choosealicense.com/licenses/) file.
+This project is protected under the [MIT License ](https://choosealicense.com/licenses/mit/) License.
 
 ---
 
