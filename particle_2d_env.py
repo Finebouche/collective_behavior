@@ -6,7 +6,7 @@ from gymnasium import spaces
 from gymnasium.utils import seeding
 from ray.rllib.env.env_context import EnvContext
 
-from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.tune import Callback
 from metrics import calculate_dos, calculate_doa
 
 import wandb
