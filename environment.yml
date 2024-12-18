@@ -17,6 +17,6 @@ dependencies:
     - torch
     - tensorflow
     - pygame
-    - wandb
+    - "wandb[media]"
     - ipywidgets
     - jupyterlab-execute-time
