@@ -1,7 +1,7 @@
 import numpy as np
 
 from ray.rllib.env import MultiAgentEnv
-from gymnasium import spaces
+from gymnasium import spaces, vector
 from gymnasium.utils import seeding
 from ray.rllib.env.env_context import EnvContext
 
@@ -358,7 +358,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             dos = 0
             doa = 0
 
-        infos = {"__common__": {"dos": dos, "doa": doa, "frame": self.render(render_mode="rgb_array"), "timestep": self.timestep}}
+        infos = {"__common__": {"dos": dos, "doa": doa, "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
 
@@ -588,7 +588,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 if agent.still_in_game == 1:
                     agent_pos = (agent.loc_x + 0.5) * pix_square_size, (agent.loc_y + 0.5) * pix_square_size
                     agent_size = agent.radius * pix_square_size
-                    if agent.agent_type == 'prey':
+                    if agent.agent_type == 0:
                         pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
                     else:
                         pygame.draw.circle(canvas, predator_color, agent_pos, agent_size)
@@ -622,22 +622,49 @@ class MetricsCallbacks(DefaultCallbacks):
         episode.custom_metrics['dos'] = average_dos
         episode.custom_metrics['doa'] = average_doa
 
-
 class RenderingCallbacks(DefaultCallbacks):
+    # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.frames = []
+        self.best_episode_and_return = (None, float("-inf"))
 
-    def on_episode_step(self, *, episode, env_index, **kwargs):
-        if env_index == 0:
-            info = episode.last_info_for("__common__")
-            frame = info['frame']
-            self.frames.append(frame)
+    def on_episode_step(self, *, episode, env, **kwargs):
+        if isinstance(env.unwrapped, vector.VectorEnv):
+            frame = env.envs[0].render()
+        else:
+            frame = env.render()
+        episode.add_temporary_timestep_data("render_images", frame)
 
     def on_episode_end(self, *, episode, **kwargs):
-        if self.frames:
-            vid = np.transpose(np.array(self.frames), (0, 3, 1, 2))
+        episode_return = episode.get_return()
+        # Better than the best Episode thus far?
+        if episode_return > self.best_episode_and_return[1]:
+            # Pull all images from the temp. data of the episode.
+            images = episode.get_temporary_timestep_data("render_images")
+            # `images` is now a list of 3D ndarrays
+
+            video = np.transpose(np.array(images), (0, 3, 1, 2))
             # save the 4D numpy array as a gif
-            # imageio.mimsave("video.gif", np.array(self.frames), fps=10)
-            episode.media["rendering"] = wandb.Video(vid, fps=30, format="gif")
-            self.frames = []
+            # imageio.mimsave("video.gif", np.array(images), fps=10)
+            if episode_return > self.best_episode_and_return[1]:
+                self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif"), episode_return)
+
+    def on_sample_end(self, *, metrics_logger, **kwargs) -> None:
+        """Logs the best cideo to this EnvRunner's MetricsLogger."""
+        # Best video.
+        if self.best_episode_and_return[0] is not None:
+            metrics_logger.log_value(
+                "episode_videos_best",
+                self.best_episode_and_return[0],
+                # Do not reduce the videos (across the various parallel EnvRunners).
+                # This would not make sense (mean over the pixels?). Instead, we want to
+                # log all best videos of all EnvRunners per iteration.
+                reduce=None,
+                # B/c we do NOT reduce over the video data (mean/min/max), we need to
+                # make sure the list of videos in our MetricsLogger does not grow
+                # infinitely and gets cleared after each `reduce()` operation, meaning
+                # every time, the EnvRunner is asked to send its logged metrics.
+                clear_on_reduce=True,
+            )
+            self.best_episode_and_return = (None, float("-inf"))
+
