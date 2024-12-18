@@ -1,13 +1,12 @@
 import numpy as np
-import math
 
 from ray.rllib.env import MultiAgentEnv
 from gymnasium import spaces
 from gymnasium.utils import seeding
 from ray.rllib.env.env_context import EnvContext
 
-from ray.tune import Callback
 from metrics import calculate_dos, calculate_doa
+from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 import wandb
 import pygame
@@ -73,7 +72,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         stage_size = config.get('stage_size')
         self.stage_size, _ = random_int_in_interval(stage_size)
         assert self.stage_size > 1
-        self.grid_diagonal = self.stage_size * np.sqrt(2)
+        self.grid_diagonal = self.stage_size * np.sqrt(2, dtype=self.float_dtype)
 
         # PHYSICS
         self.inertia = config.get('inertia')
@@ -143,8 +142,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # OBSERVATION SETTINGS
         self.max_seeing_angle = config.get('max_seeing_angle')
-        if not 0 < self.max_seeing_angle <= np.pi:
-            self.max_seeing_angle = np.pi
+        if not 0 < self.max_seeing_angle <= self.float_dtype(np.pi):
+            self.max_seeing_angle = self.float_dtype(np.pi)
 
         self.max_seeing_distance = config.get('max_seeing_distance')
         if not 0 < self.max_seeing_distance <= self.grid_diagonal:
@@ -207,7 +206,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             delta_x = agent1.loc_x - agent2.loc_x
             delta_y = agent1.loc_y - agent2.loc_y
 
-        return math.sqrt(delta_x ** 2 + delta_y ** 2)
+        return np.sqrt(delta_x ** 2 + delta_y ** 2, dtype=self.float_dtype)
 
     def compute_angle(self, agent1, agent2):
         if self.periodical_boundary:
@@ -233,10 +232,10 @@ class Particle2dEnvironment(MultiAgentEnv):
             delta_y = agent2.loc_y - agent1.loc_y
 
         # Compute the direction to the other agent
-        direction = math.atan2(delta_y, delta_x) - agent1.heading
+        direction = np.arctan2(delta_y, delta_x).astype(self.float_dtype) - agent1.heading
 
         # Normalize the direction to the range [-pi, pi]
-        direction = (direction + math.pi) % (2 * math.pi) - math.pi
+        direction = (direction + self.float_dtype(np.pi)) % (2 * self.float_dtype(np.pi)) - self.float_dtype(np.pi)
         return direction
 
     def _observation_pos(self, agent, other_agent):
@@ -259,14 +258,14 @@ class Particle2dEnvironment(MultiAgentEnv):
         obs[2] = self.stage_size - agent.loc_x
         obs[3] = self.stage_size - agent.loc_y
         # modulo 2pi to avoid large values
-        obs[4] = agent.heading % (2 * np.pi)
+        obs[4] = agent.heading % (2 * self.float_dtype(np.pi))
         # speed
         if not self.use_polar_coordinate:
             obs[5] = agent.speed_x
             obs[6] = agent.speed_y
         else:
-            obs[5] = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
-            obs[6] = math.atan2(agent.speed_y, agent.speed_x) % (2 * np.pi)
+            obs[5] = np.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2, dtype=self.float_dtype)
+            obs[6] = np.arctan2(agent.speed_y, agent.speed_x).astype(self.float_dtype) % (2 * self.float_dtype(np.pi))
 
         # OTHER AGENTS
         # Remove the agent itself and the agents that are not in the game
@@ -285,7 +284,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             # count the number of already observed properties
             base_index = 5 + j * self.num_observed_properties
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
-            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * np.pi) - np.pi)  # relative heading
+            obs[base_index + 2] = ((other.heading - agent.heading) % (2 * self.float_dtype(np.pi)) - self.float_dtype(np.pi))  # relative heading
             if self.use_speed_observation:
                 # add speed normalized by max speed for prey or predator
 
@@ -293,12 +292,13 @@ class Particle2dEnvironment(MultiAgentEnv):
                     obs[base_index + 3] = (other.speed_x - agent.speed_x)
                     obs[base_index + 4] = (other.speed_y - agent.speed_y)
                 else:
-                    obs[base_index + 3] = math.sqrt(
-                        (other.speed_x - agent.speed_x) ** 2 + (other.speed_y - agent.speed_y) ** 2
+                    obs[base_index + 3] = np.sqrt(
+                        (other.speed_x - agent.speed_x) ** 2 + (other.speed_y - agent.speed_y) ** 2,
+                        dtype=self.float_dtype
                     )
-                    obs[base_index + 4] = math.atan2(other.speed_y - agent.speed_y,
+                    obs[base_index + 4] = np.arctan2(other.speed_y - agent.speed_y,
                                                      other.speed_x - agent.speed_x
-                                                     ) - agent.heading
+                                                     ).astype(self.float_dtype) - agent.heading
 
             obs[base_index + (self.num_observed_properties - 1)] = other.agent_type
 
@@ -317,7 +317,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         random_values = self.np_random.random(size=(len(self.particule_agents), 3))
         loc_x = random_values[:, 0] * self.stage_size
         loc_y = random_values[:, 1] * self.stage_size
-        headings = random_values[:, 2] * 2 * np.pi
+        headings = random_values[:, 2] * 2 * self.float_dtype(np.pi)
 
         # Assigning the vectorized values to agents
         for i, agent in enumerate(self.particule_agents):
@@ -353,7 +353,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             loc_y = [agent.loc_y for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
             heading = [agent.heading for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
             dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
-            doa = calculate_doa(heading) / (self.num_preys * 2 * np.pi)
+            doa = calculate_doa(heading) / (self.num_preys * 2 * self.float_dtype(np.pi))
         else:
             dos = 0
             doa = 0
@@ -361,9 +361,6 @@ class Particle2dEnvironment(MultiAgentEnv):
         infos = {"__common__": {"dos": dos, "doa": doa, "frame": self.render(render_mode="rgb_array"), "timestep": self.timestep}}
 
         return observation_dict, reward_dict, terminated, truncated, infos
-
-    def render(self):
-        raise NotImplementedError()
 
     def _simulate_one_step(self, dt, action_dict=None):
 
@@ -379,7 +376,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 delta_x = agent_a.loc_x - agent_b.loc_x
                 delta_y = agent_a.loc_y - agent_b.loc_y
-                dist = math.sqrt(delta_x ** 2 + delta_y ** 2)
+                dist = np.sqrt(delta_x ** 2 + delta_y ** 2, dtype=self.float_dtype)
                 dist_min = agent_a.radius + agent_b.radius
 
                 if dist < dist_min:  # There's a collision
@@ -410,7 +407,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             if agent.still_in_game == 1:
                 # DRAGGING FORCE
                 # Calculate the speed magnitude
-                speed_magnitude = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+                speed_magnitude = np.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2, dtype=self.float_dtype)
 
                 # Calculate the dragging force amplitude based on the chosen type of friction
                 if self.friction_regime == "linear":
@@ -421,18 +418,18 @@ class Particle2dEnvironment(MultiAgentEnv):
                     dragging_force_amplitude = speed_magnitude ** 1.4 * self.dragging_force_coefficient
 
                 # opposed to the speed direction of previous step
-                dragging_force_orientation = math.atan2(agent.speed_y, agent.speed_x) - math.pi
-                acceleration_x = dragging_force_amplitude * math.cos(dragging_force_orientation)
-                acceleration_y = dragging_force_amplitude * math.sin(dragging_force_orientation)
+                dragging_force_orientation = np.arctan2(agent.speed_y, agent.speed_x).astype(self.float_dtype) - self.float_dtype(np.pi)
+                acceleration_x = dragging_force_amplitude * np.cos(dragging_force_orientation)
+                acceleration_y = dragging_force_amplitude * np.sin(dragging_force_orientation)
 
                 # ACCELERATION FORCE
                 if action_dict is not None:
                     # get the actions for this agent
                     self_force_amplitude, self_force_orientation = action_dict.get(agent.agent_id)
-                    agent.heading = (agent.heading + self_force_orientation * self.max_turn) % (2 * np.pi)
+                    agent.heading = (agent.heading + self_force_orientation * self.max_turn) % (2 * self.float_dtype(np.pi))
                     self_force_amplitude *= self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator
-                    acceleration_x += self_force_amplitude * math.cos(agent.heading)
-                    acceleration_y += self_force_amplitude * math.sin(agent.heading)
+                    acceleration_x += self_force_amplitude * np.cos(agent.heading)
+                    acceleration_y += self_force_amplitude * np.sin(agent.heading)
 
                 # CONTACT FORCE
                 contact_force = contact_force_dict.get(agent.agent_id)
@@ -468,7 +465,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
                 # Apply the speed limit
                 max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
-                current_speed = math.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2)
+                current_speed = np.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2, dtype=self.float_dtype)
                 if max_speed is not None and current_speed > max_speed:
                     agent.speed_x *= max_speed / current_speed
                     agent.speed_y *= max_speed / current_speed
@@ -600,8 +597,10 @@ class Particle2dEnvironment(MultiAgentEnv):
                 np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
             )
 
-
 class MetricsCallbacks(DefaultCallbacks):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def on_episode_start(self, *, episode, **kwargs):
         # Initialize sum of DoS for the episode
         episode.user_data['dos'] = []
