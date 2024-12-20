@@ -50,7 +50,7 @@ class Particle2dEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
 
         super().__init__()
-        self.float_dtype = np.float32
+        self.float_dtype = np.float64
         self.int_dtype = np.int32
         self.eps = self.float_dtype(1e-10)
 
@@ -314,7 +314,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # Vectorized operations for random values
         # len(self.particule_agents) can be bigger than self.num_agents
-        random_values = self.np_random.random(size=(len(self.particule_agents), 3))
+        random_values = self.np_random.random(size=(len(self.particule_agents), 3)).astype(self.float_dtype)
         loc_x = random_values[:, 0] * self.stage_size
         loc_y = random_values[:, 1] * self.stage_size
         headings = random_values[:, 2] * 2 * self.float_dtype(np.pi)
@@ -597,47 +597,34 @@ class Particle2dEnvironment(MultiAgentEnv):
                 np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
             )
 
-class MetricsCallbacks(DefaultCallbacks):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
-    def on_episode_start(self, *, episode, **kwargs):
-        # Initialize sum of DoS for the episode
-        episode.user_data['dos'] = []
-        episode.user_data['doa'] = []
-
-    #  episode, env_runner, metrics_logger, env, env_index, rl_module, worker,base_env, policies,
-    # worker,base_env, policies,
-    def on_episode_step(self, *, episode, **kwargs):
-        # Assuming you can extract loc_x and loc_y from the episode
-        info = episode.last_info_for("__common__")
-        episode.user_data["dos"].append(info["dos"])
-        episode.user_data["doa"].append(info["doa"])
-
-    def on_episode_end(self, *, episode, **kwargs):
-        # Average DoS at the end of episode
-        info = episode.last_info_for("__common__")
-        average_dos = sum(episode.user_data['dos']) / info["timestep"]
-        average_doa = sum(episode.user_data['doa']) / info["timestep"]
-        episode.custom_metrics['dos'] = average_dos
-        episode.custom_metrics['doa'] = average_doa
-
-class RenderingCallbacks(DefaultCallbacks):
+class MyCallbacks(DefaultCallbacks):
     # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.best_episode_and_return = (None, float("-inf"))
 
     def on_episode_step(self, *, episode, env, **kwargs):
+        # Rendering
         if isinstance(env.unwrapped, vector.VectorEnv):
             frame = env.envs[0].render()
         else:
             frame = env.render()
         episode.add_temporary_timestep_data("render_images", frame)
 
-    def on_episode_end(self, *, episode, **kwargs):
+        ## Metrics
+        loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+        loc_y = [agent.loc_y for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+        heading = [agent.heading for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+        dos = calculate_dos(loc_x, loc_y) / (env.num_preys * env.grid_diagonal)
+        doa = calculate_doa(heading) / (env.num_preys * 2 * env.float_dtype(np.pi))
+
+        episode.add_temporary_timestep_data("dos", dos)
+        episode.add_temporary_timestep_data("doa", doa)
+
+    def on_episode_end(self, *, episode, metrics_logger, **kwargs):
+        # Rendering
         episode_return = episode.get_return()
-        # Better than the best Episode thus far?
         if episode_return > self.best_episode_and_return[1]:
             # Pull all images from the temp. data of the episode.
             images = episode.get_temporary_timestep_data("render_images")
@@ -649,8 +636,36 @@ class RenderingCallbacks(DefaultCallbacks):
             if episode_return > self.best_episode_and_return[1]:
                 self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif"), episode_return)
 
+
+        ## Metrics
+        # Average DoS at the end of episode
+        average_dos = sum(episode.get_temporary_timestep_data("dos"))
+        average_doa = sum(episode.get_temporary_timestep_data("doa"))
+
+        metrics_logger.log_value(
+            "mean_dos",
+            average_dos,
+            reduce="mean",
+        )
+        metrics_logger.log_value(
+            "max_dos",
+            average_dos,
+            reduce="max",
+        )
+        metrics_logger.log_value(
+            "mean_doa",
+            average_doa,
+            reduce="mean",
+        )
+        metrics_logger.log_value(
+            "max_doa",
+            average_doa,
+            reduce="max",
+        )
+
+
     def on_sample_end(self, *, metrics_logger, **kwargs) -> None:
-        """Logs the best cideo to this EnvRunner's MetricsLogger."""
+        """Logs the best video to this EnvRunner's MetricsLogger."""
         # Best video.
         if self.best_episode_and_return[0] is not None:
             metrics_logger.log_value(
@@ -667,4 +682,5 @@ class RenderingCallbacks(DefaultCallbacks):
                 clear_on_reduce=True,
             )
             self.best_episode_and_return = (None, float("-inf"))
+
 
