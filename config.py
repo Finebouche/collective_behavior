@@ -5,7 +5,7 @@ run_config = dict(
     env=dict(
         # Computational
         use_vectorized=False,   # mostly useless for low number of fish
-        step_per_time_increment = 5, # int ≥ 1
+        step_per_time_increment = 2, # int ≥ 1
         # General
         num_preys=30,
         num_predators=2,
@@ -16,7 +16,7 @@ run_config = dict(
         dragging_force_coefficient=2,
         contact_force_coefficient=5,
         contact_margin=0.2,
-        friction_regime="linear",            # linear=1, quadratic=2 or intermediate=1.4
+        friction_regime="quadratic",            # linear=1, quadratic=2 or intermediate=1.4
         periodical_boundary=False,           # If False, the wall is solid
         wall_contact_force_coefficient=5,    # Only used when periodical_boundary=False, else ignored
         prey_consumed=True,
@@ -27,8 +27,8 @@ run_config = dict(
         max_speed_prey=None,
         max_speed_predator=None,
         # Action
-        max_acceleration_prey=1.0,
-        max_acceleration_predator=8.0,
+        max_acceleration_prey=0.5,
+        max_acceleration_predator=2.0,
         max_turn=np.pi / 4,  # pi radians
         # Rewards
         # reward must be positive, penalty must be negative

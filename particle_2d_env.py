@@ -134,7 +134,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.action_space = spaces.Dict({
             agent.agent_id: spaces.Box(
                 low=np.array([0, -1]),  # this gets multiplied later
-                high=np.array([1, -1]),  # this gets multiplied later
+                high=np.array([1, 1]),  # this gets multiplied later
                 dtype=self.float_dtype,
                 shape=(2,)
             ) for agent in self.particule_agents
@@ -320,18 +320,17 @@ class Particle2dEnvironment(MultiAgentEnv):
         headings = random_values[:, 2] * 2 * self.float_dtype(np.pi)
 
         # Assigning the vectorized values to agents
-        for i, agent in enumerate(self.particule_agents):
+        for i, _ in enumerate(self.particule_agents):
             if i < self.num_agents:
-                agent.loc_x, agent.loc_y = loc_x[i], loc_y[i]
-                agent.speed_x, agent.speed_y = 0.0, 0.0
-                agent.heading = headings[i]
-                agent.still_in_game = 1
+                self.particule_agents[i].loc_x, self.particule_agents[i].loc_y = loc_x[i], loc_y[i]
+                self.particule_agents[i].speed_x, self.particule_agents[i].speed_y = 0.0, 0.0
+                self.particule_agents[i].heading = headings[i]
+                self.particule_agents[i].still_in_game = 1
 
         observation_list = self._get_observation_dict()
         return observation_list, {}
 
     def step(self, action_list):
-        self.timestep += 1
 
         all_eating_events = []
         for i in range(self.step_per_time_increment):
@@ -346,19 +345,9 @@ class Particle2dEnvironment(MultiAgentEnv):
         reward_dict = self._get_reward(action_list, all_eating_events)
         observation_dict = self._get_observation_dict()
         terminated, truncated = self._get_done()
+        self.timestep += 1
 
-        # get array of locations for each agent
-        if self.num_preys > 0:
-            loc_x = [agent.loc_x for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            loc_y = [agent.loc_y for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            heading = [agent.heading for agent in self.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-            dos = calculate_dos(loc_x, loc_y) / (self.num_preys * self.grid_diagonal)
-            doa = calculate_doa(heading) / (self.num_preys * 2 * self.float_dtype(np.pi))
-        else:
-            dos = 0
-            doa = 0
-
-        infos = {"__common__": {"dos": dos, "doa": doa, "timestep": self.timestep}}
+        infos = {}
 
         return observation_dict, reward_dict, terminated, truncated, infos
 
@@ -586,7 +575,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             # Drawing the agents
             for agent in self.particule_agents:
                 if agent.still_in_game == 1:
-                    agent_pos = (agent.loc_x + 0.5) * pix_square_size, (agent.loc_y + 0.5) * pix_square_size
+                    agent_pos = (agent.loc_x - agent.radius/2) * pix_square_size, (agent.loc_y - agent.radius/2) * pix_square_size
                     agent_size = agent.radius * pix_square_size
                     if agent.agent_type == 0:
                         pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
@@ -616,11 +605,13 @@ class MyCallbacks(DefaultCallbacks):
         loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
         loc_y = [agent.loc_y for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
         heading = [agent.heading for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-        dos = calculate_dos(loc_x, loc_y) / (env.num_preys * env.grid_diagonal)
-        doa = calculate_doa(heading) / (env.num_preys * 2 * env.float_dtype(np.pi))
 
-        episode.add_temporary_timestep_data("dos", dos)
-        episode.add_temporary_timestep_data("doa", doa)
+        if env.num_preys > 0:
+            dos = calculate_dos(loc_x, loc_y) / (env.num_preys * env.grid_diagonal)
+            doa = calculate_doa(heading) / (env.num_preys * 2 * env.float_dtype(np.pi))
+
+            episode.add_temporary_timestep_data("dos", dos)
+            episode.add_temporary_timestep_data("doa", doa)
 
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
         # Rendering
@@ -629,40 +620,22 @@ class MyCallbacks(DefaultCallbacks):
             # Pull all images from the temp. data of the episode.
             images = episode.get_temporary_timestep_data("render_images")
             # `images` is now a list of 3D ndarrays
-
+            # For WandB videos, we need to put channels first.
             video = np.transpose(np.array(images), (0, 3, 1, 2))
             # save the 4D numpy array as a gif
             # imageio.mimsave("video.gif", np.array(images), fps=10)
             if episode_return > self.best_episode_and_return[1]:
                 self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif"), episode_return)
 
-
         ## Metrics
         # Average DoS at the end of episode
         average_dos = sum(episode.get_temporary_timestep_data("dos"))
         average_doa = sum(episode.get_temporary_timestep_data("doa"))
 
-        metrics_logger.log_value(
-            "mean_dos",
-            average_dos,
-            reduce="mean",
-        )
-        metrics_logger.log_value(
-            "max_dos",
-            average_dos,
-            reduce="max",
-        )
-        metrics_logger.log_value(
-            "mean_doa",
-            average_doa,
-            reduce="mean",
-        )
-        metrics_logger.log_value(
-            "max_doa",
-            average_doa,
-            reduce="max",
-        )
-
+        metrics_logger.log_value("mean_dos", average_dos, reduce="mean")
+        metrics_logger.log_value("max_dos", average_dos, reduce="max")
+        metrics_logger.log_value("mean_doa", average_doa, reduce="mean")
+        metrics_logger.log_value("max_doa", average_doa, reduce="max")
 
     def on_sample_end(self, *, metrics_logger, **kwargs) -> None:
         """Logs the best video to this EnvRunner's MetricsLogger."""
