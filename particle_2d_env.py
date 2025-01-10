@@ -9,8 +9,12 @@ from metrics import calculate_dos, calculate_doa
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 import wandb
-import pygame
+import cv2
 
+def color_from_hex(hex_str):
+    """Convenience: Convert a color hex string like '#C843C3' to an RGB NumPy array."""
+    hex_str = hex_str.lstrip('#')
+    return np.array([int(hex_str[i:i+2], 16) for i in (0, 2, 4)], dtype=np.uint8)
 
 def sign(x):
     if x == 0:
@@ -561,32 +565,35 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         return terminated, truncated
 
-    def render(self, render_mode="rgb_array"):
-        if render_mode == "rgb_array":
-            predator_color = pygame.Color("#C843C3")
-            prey_color = pygame.Color("#245EB6")
-            fig_size = 512
+    def render(self, render_mode: str = "rgb_array"):
+        if render_mode != "rgb_array":
+            return
 
-            canvas = pygame.Surface((fig_size, fig_size))
-            canvas.fill((255, 255, 255))
+        predator_color = (195, 67, 200)
+        prey_color = (44, 60, 182)
 
-            # Calculating the pixel square size
-            pix_square_size = fig_size / self.stage_size
+        fig_size = 512
+        pix_square_size = fig_size / self.stage_size
 
-            # Drawing the agents
-            for agent in self.particule_agents:
-                if agent.still_in_game == 1:
-                    agent_pos = agent.loc_x * pix_square_size, agent.loc_y * pix_square_size
-                    agent_size = agent.radius * pix_square_size
-                    if agent.agent_type == 0:
-                        pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
-                    else:
-                        pygame.draw.circle(canvas, predator_color, agent_pos, agent_size)
+        # Create a blank white canvas
+        canvas = np.ones((fig_size, fig_size, 3), dtype=np.uint8) * 255
 
-            return np.transpose(
-                np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
-            )
+        for agent in self.particule_agents:
+            if agent.still_in_game == 1:
+                center = (
+                    int(agent.loc_x * pix_square_size),
+                    int(agent.loc_y * pix_square_size),
+                )
+                radius = int(agent.radius * pix_square_size)
+                color = prey_color if agent.agent_type == 0 else predator_color
 
+                # thickness = -1 means filled circle
+                cv2.circle(canvas, center, radius, color, thickness=-1)
+
+        # `canvas` is already shape (height, width, 3).
+        # If you need (width, height, 3), you could transpose, but usually
+        # (height, width, 3) is standard in image processing and in many loggers.
+        return canvas
 
 class MyCallbacks(DefaultCallbacks):
     # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py

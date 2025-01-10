@@ -8,7 +8,7 @@ run_config = dict(
         step_per_time_increment = 2, # int ≥ 1
         # General
         num_preys=30,
-        num_predators=2,
+        num_predators=4,
         stage_size=30,
         episode_length=700,
         # Physics
@@ -17,9 +17,9 @@ run_config = dict(
         contact_force_coefficient=5,
         contact_margin=0.2,
         friction_regime="quadratic",            # linear=1, quadratic=2 or intermediate=1.4
-        periodical_boundary=False,           # If False, the wall is solid
+        periodical_boundary=True,           # If False, the wall is solid
         wall_contact_force_coefficient=5,    # Only used when periodical_boundary=False, else ignored
-        prey_consumed=True,
+        prey_consumed=False,                 # If True, prey are removed when eaten
         # Agents
         prey_radius=0.1,
         predator_radius=0.4,
@@ -27,7 +27,7 @@ run_config = dict(
         max_speed_prey=None,
         max_speed_predator=None,
         # Action
-        max_acceleration_prey=0.5,
+        max_acceleration_prey=0.2,
         max_acceleration_predator=2.0,
         max_turn=np.pi / 4,  # pi radians
         # Rewards
