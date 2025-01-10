@@ -1,47 +1,50 @@
-
 import numpy as np
+from scipy.spatial import distance_matrix
 
 
 def calculate_dos(loc_x, loc_y):
-    # Dos : degree of sparsity
-    # It is a measure of the density of the agents in the environment
-    # It is calculated as the average normalized distance to the nearest neighborhood of all conspecifics in an episode
-    if len(loc_x) < 2 or len(loc_y) < 2:  # If 1 or 0 agent
-        return 0
+    """
+    Degree of Sparsity (DoS):
+    - A measure of how spread out (or dense) agents are.
+    - In this example: the sum of each agent's distance to its closest neighbor.
+      (Often you'd take the average or another statistic, but we'll preserve the 'sum' behavior.)
+    """
+    # Edge case: If fewer than 2 agents, return 0
+    if len(loc_x) < 2 or len(loc_y) < 2:
+        return 0.0
 
-    locations = np.vstack((loc_x, loc_y)).T
+    # Combine x and y coordinates into an (N,2) array
+    locations = np.column_stack((loc_x, loc_y))
+    dist_mat = distance_matrix(locations, locations)
+    # Ignore self-distances by setting them to np.inf
+    np.fill_diagonal(dist_mat, np.inf)
 
-    # Calculate the pairwise distances using np.linalg.norm
-    distances = np.linalg.norm(locations[:, np.newaxis] - locations, axis=2)
-    np.fill_diagonal(distances, np.inf)
-    min_distances = np.min(distances, axis=1)
-    sum_min_distances = np.sum(min_distances)
-
-    return sum_min_distances
+    # Take the minimum distance per agent
+    min_dists = np.min(dist_mat, axis=1)
+    return np.sum(min_dists)
 
 
 def calculate_doa(headings):
-    # Calculates the Degree of Alignment (DoA) among agents based on their headings.
+    """
+    Degree of Alignment (DoA):
+    - A measure of how aligned agents are, based on headings in [0, 2π).
+    - Here, we sum each agent's minimum circular difference to any other agent.
+      (Again, you might want an average or another metric, but we'll preserve the existing logic.)
+    """
+    # If fewer than 2 agents, no meaningful alignment
+    if len(headings) < 2:
+        return 0.0
 
-    if len(headings) < 2:  # Need at least two agents to calculate DoA
-        return 0
+    headings = np.asarray(headings, dtype=float)
 
-    headings = np.array(headings)
-    n = len(headings)
-    alignments = np.zeros((n, n))
+    # Create pairwise angle differences using broadcasting
+    diff_mat = np.abs(headings[:, None] - headings)
+    # For circular angles, the difference is min(angle_diff, 2π - angle_diff)
+    diff_mat = np.minimum(diff_mat, 2 * np.pi - diff_mat)
 
-    # Calculate pairwise angular differences, taking the circular nature into account
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                diff = abs(headings[i] - headings[j])
-                # Considering circular nature of angles: the difference should be in the range [0, π]
-                alignments[i, j] = min(diff, 2*np.pi - diff)
-            else:
-                alignments[i, j] = np.inf  # Ignore self-comparison
+    # Ignore self-comparisons
+    np.fill_diagonal(diff_mat, np.inf)
 
-    # Take the minimum alignment for each agent, and then sum these minimums
-    min_alignments = np.min(alignments, axis=1)
-    sum_alignments = np.sum(min_alignments)
-
-    return sum_alignments
+    # For each agent, find the minimum angular difference across others
+    min_diffs = np.min(diff_mat, axis=1)
+    return np.sum(min_diffs)

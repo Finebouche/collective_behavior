@@ -498,11 +498,12 @@ class Particle2dEnvironment(MultiAgentEnv):
             # Apply the eating reward for the predator and the death penalty for the prey
             reward_dict[predator_id] += self.eating_reward_for_predator
             reward_dict[prey_id] += self.death_penalty_for_prey
-            self.num_preys -= 1
             # find the prey in particule_agents and set still_in_game to 0
-            for agent in self.particule_agents:
-                if agent.agent_id == prey_id:
-                    agent.still_in_game = 0
+            if self.prey_consumed:
+                self.num_preys -= 1
+                for agent in self.particule_agents:
+                    if agent.agent_id == prey_id:
+                        agent.still_in_game = 0
 
             # collective penalty for preys
             for agent in self.particule_agents:
@@ -575,7 +576,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             # Drawing the agents
             for agent in self.particule_agents:
                 if agent.still_in_game == 1:
-                    agent_pos = (agent.loc_x - agent.radius/2) * pix_square_size, (agent.loc_y - agent.radius/2) * pix_square_size
+                    agent_pos = agent.loc_x * pix_square_size, agent.loc_y * pix_square_size
                     agent_size = agent.radius * pix_square_size
                     if agent.agent_type == 0:
                         pygame.draw.circle(canvas, prey_color, agent_pos, agent_size)
@@ -612,6 +613,7 @@ class MyCallbacks(DefaultCallbacks):
 
             episode.add_temporary_timestep_data("dos", dos)
             episode.add_temporary_timestep_data("doa", doa)
+            episode.add_temporary_timestep_data("time_step", 1)
 
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
         # Rendering
@@ -625,12 +627,13 @@ class MyCallbacks(DefaultCallbacks):
             # save the 4D numpy array as a gif
             # imageio.mimsave("video.gif", np.array(images), fps=10)
             if episode_return > self.best_episode_and_return[1]:
-                self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif"), episode_return)
+                # maybe video = video = np.expand_dims(video, axis=0) is better
+                self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif") , episode_return)
 
         ## Metrics
         # Average DoS at the end of episode
-        average_dos = sum(episode.get_temporary_timestep_data("dos"))
-        average_doa = sum(episode.get_temporary_timestep_data("doa"))
+        average_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
+        average_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
 
         metrics_logger.log_value("mean_dos", average_dos, reduce="mean")
         metrics_logger.log_value("max_dos", average_dos, reduce="max")
