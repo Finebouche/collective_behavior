@@ -17,7 +17,7 @@ run_config = dict(
         contact_force_coefficient=5,
         contact_margin=0.2,
         friction_regime="quadratic",            # linear=1, quadratic=2 or intermediate=1.4
-        periodical_boundary=True,           # If False, the wall is solid
+        periodical_boundary=False,           # If False, the wall is solid
         wall_contact_force_coefficient=5,    # Only used when periodical_boundary=False, else ignored
         prey_consumed=False,                 # If True, prey are removed when eaten
         # Agents
@@ -37,8 +37,8 @@ run_config = dict(
         collective_eating_reward_for_predator=0,
         surviving_reward_for_prey=0,
         death_penalty_for_prey=-1.0,
-        collective_death_penalty_for_prey=-0,
-        edge_hit_penalty=-0.01,
+        collective_death_penalty_for_prey=-0.001,
+        edge_hit_penalty=0,
         energy_cost_penalty_coef=0.001, # positive < 1 (this is for a ratio)
         # Observations
         max_seeing_angle=3*np.pi/4,  # Put None if not used (between 0 and pi)

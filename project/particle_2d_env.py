@@ -600,14 +600,16 @@ class MyCallbacks(DefaultCallbacks):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.best_episode_and_return = (None, float("-inf"))
+        self.sample_step = 0
 
     def on_episode_step(self, *, episode, env, **kwargs):
         # Rendering
-        if isinstance(env.unwrapped, vector.VectorEnv):
-            frame = env.envs[0].render()
-        else:
-            frame = env.render()
-        episode.add_temporary_timestep_data("render_images", frame)
+        if self.sample_step % 10 == 0:
+            if isinstance(env.unwrapped, vector.VectorEnv):
+                frame = env.envs[0].render()
+            else:
+                frame = env.render()
+            episode.add_temporary_timestep_data("render_images", frame)
 
         ## Metrics
         loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
@@ -625,7 +627,7 @@ class MyCallbacks(DefaultCallbacks):
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
         # Rendering
         episode_return = episode.get_return()
-        if episode_return > self.best_episode_and_return[1]:
+        if episode_return > self.best_episode_and_return[1] and self.sample_step % 10 == 0:
             # Pull all images from the temp. data of the episode.
             images = episode.get_temporary_timestep_data("render_images")
             # `images` is now a list of 3D ndarrays
@@ -650,7 +652,7 @@ class MyCallbacks(DefaultCallbacks):
     def on_sample_end(self, *, metrics_logger, **kwargs) -> None:
         """Logs the best video to this EnvRunner's MetricsLogger."""
         # Best video.
-        if self.best_episode_and_return[0] is not None:
+        if self.best_episode_and_return[0] is not None and self.sample_step % 10 == 0:
             metrics_logger.log_value(
                 "episode_videos_best",
                 self.best_episode_and_return[0],
@@ -666,4 +668,5 @@ class MyCallbacks(DefaultCallbacks):
             )
             self.best_episode_and_return = (None, float("-inf"))
 
+        self.sample_step += 1
 
