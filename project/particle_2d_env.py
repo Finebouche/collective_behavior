@@ -12,7 +12,9 @@ import wandb
 import cv2
 
 def color_from_hex(hex_str):
-    """Convenience: Convert a color hex string like '#C843C3' to an RGB NumPy array."""
+    """
+    Convenience: Convert a color hex string like '#C843C3' to an RGB NumPy array.
+    """
     hex_str = hex_str.lstrip('#')
     return np.array([int(hex_str[i:i+2], 16) for i in (0, 2, 4)], dtype=np.uint8)
 
@@ -24,10 +26,11 @@ def sign(x):
     else:
         return -1
 
-
-# function that check if variable is an array, then choose a random int in the interval
-# return the number and the max_value
 def random_int_in_interval(variable):
+    """
+    function that check if variable is an array, then choose a random int in the interval
+    return the number and the max_value
+    """
     if isinstance(variable, list):
         return np.random.randint(variable[0], variable[1]), variable[1]
     else:
@@ -38,8 +41,7 @@ class BaseEntity:
     Minimal base class holding positional information, a radius, and a type.
     Both agents and food will inherit from this class.
     """
-    def __init__(self, entity_id=None, radius=None, entity_type=None,
-                 loc_x=None, loc_y=None):
+    def __init__(self, entity_id=None, radius=None, entity_type=None, loc_x=None, loc_y=None):
         self.entity_id = entity_id
         self.entity_type = entity_type    # e.g. 0 = prey, 1 = predator, 2 = food
         self.radius = radius
@@ -66,14 +68,13 @@ class Food(BaseEntity):
     A Food item can be inactive when eaten;
     it re-spawns based on the patch logic.
     """
-    def __init__(self, entity_id=None, radius=None, food_type=2,
-                 loc_x=None, loc_y=None, active=True):
-        super().__init__(entity_id=id, radius=radius, entity_type=2, loc_x=loc_x, loc_y=loc_y)
+    def __init__(self, entity_id=None, patch_id=None, radius=None, food_type=2, loc_x=None, loc_y=None, active=True):
+        super().__init__(entity_id=entity_id, radius=radius, entity_type=2, loc_x=loc_x, loc_y=loc_y)
+        self.patch_id = patch_id
         self.active = active
 
 class Particle2dEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
-
         super().__init__()
         self.float_dtype = np.float64
         self.int_dtype = np.int32
@@ -89,7 +90,9 @@ class Particle2dEnvironment(MultiAgentEnv):
         assert isinstance(self.step_per_time_increment, int)
         self.dt = 1 / self.step_per_time_increment
 
+        #######################################
         # ENVIRONMENT
+        #######################################
         self.timestep = 0
         self.episode_length = config.get('episode_length')
         assert self.episode_length > 0
@@ -99,7 +102,9 @@ class Particle2dEnvironment(MultiAgentEnv):
         assert self.stage_size > 1
         self.grid_diagonal = self.stage_size * np.sqrt(2, dtype=self.float_dtype)
 
+        #######################################
         # PHYSICS
+        #######################################
         self.inertia = config.get('inertia')
         self.dragging_force_coefficient = config.get('dragging_force_coefficient')
         self.contact_force_coefficient = config.get('contact_force_coefficient')
@@ -117,7 +122,9 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.prey_consumed = config.get('prey_consumed')
 
+        #######################################
         # AGENTS (PREYS AND PREDATORS)
+        #######################################
         # random number of preys
         self.ini_num_preys, self.max_num_preys = random_int_in_interval(config.get('num_preys'))
         self.num_preys = self.ini_num_preys
@@ -146,32 +153,30 @@ class Particle2dEnvironment(MultiAgentEnv):
                 agent_type, radius, still_in_game = None, None, 0
             self.particule_agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
-
         self.agents = [agent.entity_id for agent in self.particule_agents if agent.still_in_game == 1]
         self.possible_agents = [agent.entity_id for agent in self.particule_agents]
         self._agent_ids = {agent.entity_id for agent in self.particule_agents}  # Used by RLlib
 
+        #######################################
         # FOOD / FOOD PATCHES
-        # If you want patches that automatically re-spawn food:
+        #######################################
         self.num_food_patch = config.get('num_food_patch', 0)
         if self.num_food_patch > 0:
-            # Make sure these exist in your config
             self.food_patch_radius = config.get('food_patch_radius')  # the patch area
             self.food_radius = config.get('food_radius')              # each food piece radius
-            self.food_patch_regen_time = config.get('food_spawn_freq')
+            self.food_patch_regen_time = config.get('food_patch_regen_time')
+            self.max_number_of_food = config.get('max_number_of_food')
             self.food_reward = config.get('food_reward')
-        else:
-            self.food_patch_radius = 0
-            self.food_radius = 0
-            self.food_patch_regen_time = None
-            self.food_reward = 0
 
-        # We will keep track of each patch as a dict: { "patch_id": int, "cx": float, "cy": float }
+        # initialize the food patches
         self.food_patches = []
         # The active food items in the env:
         self.foods = []
 
+
+        #######################################
         # ACTIONS (ACCELERATION AND TURN)
+        #######################################
         self.max_acceleration_prey = config.get('max_acceleration_prey')
         self.max_acceleration_predator = config.get('max_acceleration_predator')
         self.max_turn = config.get('max_turn')
@@ -202,8 +207,6 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.use_speed_observation = config.get('use_speed_observation')
 
         # Number of observed properties
-
-        # Number of observed properties
         # - Self observation has 7 slots: 4 (distance to walls) + 1 heading + 2 speed
         self.self_observed_properties = 7
         # - Each "other agent" observed has (relative pos) + relative heading + optional speed + type
@@ -228,7 +231,9 @@ class Particle2dEnvironment(MultiAgentEnv):
             ) for agent in self.particule_agents
         })
 
+        #######################################
         # REWARDS
+        #######################################
         self.starving_penalty_for_predator = config.get('starving_penalty_for_predator')
         self.eating_reward_for_predator = config.get('eating_reward_for_predator')
         self.collective_eating_reward_for_predator = config.get('collective_eating_reward_for_predator')
@@ -349,6 +354,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         # 3) NEAREST FOOD (if any) -> last 3 slots
         if self.num_food_patch > 0:
+            base_index = self.self_observed_properties + self.num_other_agents_observed * self.num_observed_properties
             active_foods = [f for f in self.foods if f.active]
             if len(active_foods) > 0:
                 nearest_food = min(active_foods, key=lambda f: self.compute_distance(agent, f))
@@ -364,6 +370,30 @@ class Particle2dEnvironment(MultiAgentEnv):
 
     def _get_observation_dict(self):
         return {agent.entity_id: self._generate_observation(agent) for agent in self.particule_agents if agent.still_in_game == 1}
+
+    def generate_food(self, patch_cx, patch_cy, patch_id):
+        r = self.np_random.uniform(0, self.food_patch_radius)
+        theta = self.np_random.uniform(0, 2 * np.pi)
+        fx = patch_cx + r * np.cos(theta)
+        fy = patch_cy + r * np.sin(theta)
+        # make sure it is inside the stage, make a distinction if borders are periodic or not
+        if self.periodical_boundary:
+            fx = fx % self.stage_size
+            fy = fy % self.stage_size
+        else:
+            fx = max(self.food_radius, min(fx, self.stage_size - self.food_radius))
+            fy = max(self.food_radius, min(fy, self.stage_size - self.food_radius))
+
+        new_food = Food(
+            entity_id=len(self.foods),
+            patch_id=patch_id,
+            radius=self.food_radius,
+            loc_x=fx,
+            loc_y=fy,
+            active=True
+        )
+
+        return new_food
 
     def reset(self, seed=None, options=None):
         # Reset time to the beginning
@@ -386,66 +416,26 @@ class Particle2dEnvironment(MultiAgentEnv):
                 self.particule_agents[i].still_in_game = 1
 
 
+        # """
         # Initialize food patches and food
         # """
-        # For each patch, add a random number of foods [0..max_number_of_food] inside the patch.
-        # """
+        self.food_patches = []
+        for i in range(self.num_food_patch):
+            patch_id = i
+            cx = self.np_random.uniform(0, self.stage_size)
+            cy = self.np_random.uniform(0, self.stage_size)
+            self.food_patches.append({"patch_id": patch_id, "cx": cx, "cy": cy, "next_spawn_time": 0})
+
+        # initial spawn
+        self.foods = []
         for patch in self.food_patches:
-            # random how many initial
             initial_count = self.np_random.randint(0, self.max_number_of_food + 1)
             for _ in range(initial_count):
-                r = self.np_random.uniform(0, self.food_patch_radius)
-                theta = self.np_random.uniform(0, 2 * np.pi)
-                fx = patch["cx"] + r * np.cos(theta)
-                fy = patch["cy"] + r * np.sin(theta)
-                new_food = Food(
-                    id=patch["patch_id"],
-                    radius=self.food_radius,
-                    loc_x=fx,
-                    loc_y=fy,
-                    active=True
-                )
+                new_food = self.generate_food(patch["cx"], patch["cy"], patch["patch_id"])
                 self.foods.append(new_food)
-
-            # initial spawn
-            self._spawn_food_from_patches(force_spawn=True)
 
         observation_list = self._get_observation_dict()
         return observation_list, {}
-
-    def _spawn_food_from_patches(self, force_spawn=False):
-        """
-        For each patch, if the patch is allowed to spawn (timestep >= next_spawn_time)
-        and there is no active food inside it, spawn a new piece of food in that patch area.
-        If `force_spawn=True`, ignore the next_spawn_time requirement (used at reset).
-        """
-        if self.num_food_patch == 0:
-            return
-
-        for patch in self.food_patches:
-            # check the time
-            if force_spawn or (self.timestep >= patch["next_spawn_time"]):
-                # check if there's already active food in that patch
-                patch_food = [f for f in self.foods if f.active and f.entity_id == patch["patch_id"]]
-                if len(patch_food) == 0:
-                    # spawn new food inside patch radius
-                    r = self.np_random.uniform(0, self.food_patch_radius)
-                    theta = self.np_random.uniform(0, 2 * np.pi)
-                    fx = patch["cx"] + r * np.cos(theta)
-                    fy = patch["cy"] + r * np.sin(theta)
-
-                    # create food
-                    new_food = Food(
-                        entity_id=patch["patch_id"],  # or any ID scheme
-                        radius=self.food_radius,
-                        food_type=2,
-                        loc_x=fx,
-                        loc_y=fy,
-                        active=True
-                    )
-                    self.foods.append(new_food)
-                # schedule next spawn
-                patch["next_spawn_time"] = self.timestep + (self.food_patch_regen_time or 9999999)
 
     def step(self, action_list):
 
@@ -460,7 +450,17 @@ class Particle2dEnvironment(MultiAgentEnv):
             all_eating_events.extend(eating_events)
 
         # Possibly spawn more food if the time interval has elapsed
-        self._spawn_food_from_patches(force_spawn=False)
+        for patch in self.food_patches:
+            # check the time
+            if self.timestep >= patch["next_spawn_time"]:
+                # check if there's already active food in that patch
+                patch_food = [f for f in self.foods if f.active and f.patch_id == patch["patch_id"]]
+                if len(patch_food) < self.max_number_of_food:
+                    new_food = self.generate_food(patch["cx"], patch["cy"], patch["patch_id"])
+                    self.foods.append(new_food)
+                # schedule next spawn
+                patch["next_spawn_time"] = self.timestep + (self.food_patch_regen_time or 9999999)
+
 
         reward_dict = self._get_reward(action_list, all_eating_events)
         observation_dict = self._get_observation_dict()
@@ -526,7 +526,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             if not food_item.active:
                 continue
             for agent in self.particule_agents:
-                if agent.still_in_game == 0:
+                if agent.still_in_game == 0 and agent.entity_type == 1: # Only preys can eat
                     continue
                 dist = self.compute_distance(agent, food_item)
                 if dist < (agent.radius + food_item.radius):
@@ -732,12 +732,22 @@ class Particle2dEnvironment(MultiAgentEnv):
         predator_color = (195, 67, 200)
         prey_color = (44, 60, 182)
         food_color = (60, 180, 75)
+        patch_zone_color = (200, 255, 190)
 
         fig_size = 512
         pix_square_size = fig_size / self.stage_size
 
         # Create a blank white canvas
         canvas = np.ones((fig_size, fig_size, 3), dtype=np.uint8) * 255
+
+        # Draw food patches
+        for patch in self.food_patches:
+            center = (
+                int(patch["cx"] * pix_square_size),
+                int(patch["cy"] * pix_square_size),
+            )
+            radius = int(self.food_patch_radius * pix_square_size)
+            cv2.circle(canvas, center, radius, patch_zone_color, thickness=-1)
 
         # Draw agents
         for agent in self.particule_agents:
