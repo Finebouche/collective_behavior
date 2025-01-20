@@ -26,6 +26,13 @@ run_config = dict(
         agent_density=1000,  # density of the agents to calculate the mass (should be arround 1000 if radius about 0.1)
         max_speed_prey=None,
         max_speed_predator=None,
+        # Food
+        num_food_patch=0,
+        food_patch_radius=4,
+        food_radius=1,
+        max_number_of_food=15,
+        food_spawn_freq=5,
+        food_reward=1,
         # Action
         max_acceleration_prey=0.2,
         max_acceleration_predator=2.0,

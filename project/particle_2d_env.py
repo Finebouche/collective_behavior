@@ -33,22 +33,43 @@ def random_int_in_interval(variable):
     else:
         return variable, variable
 
-
-class ParticuleAgent:
-    def __init__(self, id=None, radius=None, agent_type=None,
-                 loc_x=None, loc_y=None, heading=None,
-                 speed_x=None, speed_y=None,
-                 still_in_game=1):
-        self.agent_id = id
-        self.agent_type = agent_type
+class BaseEntity:
+    """
+    Minimal base class holding positional information, a radius, and a type.
+    Both agents and food will inherit from this class.
+    """
+    def __init__(self, entity_id=None, radius=None, entity_type=None,
+                 loc_x=None, loc_y=None):
+        self.entity_id = entity_id
+        self.entity_type = entity_type    # e.g. 0 = prey, 1 = predator, 2 = food
         self.radius = radius
         self.loc_x = loc_x
         self.loc_y = loc_y
+
+class ParticuleAgent(BaseEntity):
+    """
+    Agents (prey or predator). Inherits from BaseEntity, adding
+    speeds, heading, and a flag whether still in game.
+    """
+    def __init__(self, id=None, radius=None, agent_type=None,
+                 loc_x=None, loc_y=None, heading=None,
+                 speed_x=None, speed_y=None, still_in_game=1):
+        super().__init__(entity_id=id, radius=radius, entity_type=agent_type, loc_x=loc_x, loc_y=loc_y)
+        self.heading = heading
         self.speed_x = speed_x
         self.speed_y = speed_y
-        self.heading = heading
         self.still_in_game = still_in_game
 
+class Food(BaseEntity):
+    """
+    A Food entity. Also inherits from BaseEntity.
+    A Food item can be inactive when eaten;
+    it re-spawns based on the patch logic.
+    """
+    def __init__(self, entity_id=None, radius=None, food_type=2,
+                 loc_x=None, loc_y=None, active=True):
+        super().__init__(entity_id=id, radius=radius, entity_type=2, loc_x=loc_x, loc_y=loc_y)
+        self.active = active
 
 class Particle2dEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
@@ -126,9 +147,29 @@ class Particle2dEnvironment(MultiAgentEnv):
             self.particule_agents.append(ParticuleAgent(id=i, agent_type=agent_type, radius=radius, still_in_game=still_in_game))
 
 
-        self.agents = [agent.agent_id for agent in self.particule_agents if agent.still_in_game == 1]
-        self.possible_agents = [agent.agent_id for agent in self.particule_agents]
-        self._agent_ids = {agent.agent_id for agent in self.particule_agents}  # Used by RLlib
+        self.agents = [agent.entity_id for agent in self.particule_agents if agent.still_in_game == 1]
+        self.possible_agents = [agent.entity_id for agent in self.particule_agents]
+        self._agent_ids = {agent.entity_id for agent in self.particule_agents}  # Used by RLlib
+
+        # FOOD / FOOD PATCHES
+        # If you want patches that automatically re-spawn food:
+        self.num_food_patch = config.get('num_food_patch', 0)
+        if self.num_food_patch > 0:
+            # Make sure these exist in your config
+            self.food_patch_radius = config.get('food_patch_radius')  # the patch area
+            self.food_radius = config.get('food_radius')              # each food piece radius
+            self.food_patch_regen_time = config.get('food_spawn_freq')
+            self.food_reward = config.get('food_reward')
+        else:
+            self.food_patch_radius = 0
+            self.food_radius = 0
+            self.food_patch_regen_time = None
+            self.food_reward = 0
+
+        # We will keep track of each patch as a dict: { "patch_id": int, "cx": float, "cy": float }
+        self.food_patches = []
+        # The active food items in the env:
+        self.foods = []
 
         # ACTIONS (ACCELERATION AND TURN)
         self.max_acceleration_prey = config.get('max_acceleration_prey')
@@ -136,7 +177,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.max_turn = config.get('max_turn')
 
         self.action_space = spaces.Dict({
-            agent.agent_id: spaces.Box(
+            agent.entity_id: spaces.Box(
                 low=np.array([0, -1]),  # this gets multiplied later
                 high=np.array([1, 1]),  # this gets multiplied later
                 dtype=self.float_dtype,
@@ -161,14 +202,25 @@ class Particle2dEnvironment(MultiAgentEnv):
         self.use_speed_observation = config.get('use_speed_observation')
 
         # Number of observed properties
-        self.self_observed_properties = 7  # 4 position, 1 heading, 2 speed
-        self.num_observed_properties = 4  # relative heading and positions + type are always observed
-        if self.use_speed_observation:  # speed is observed when use_speed_observation is True
-            self.num_observed_properties += 2
-        self.observation_size = self.self_observed_properties + self.num_observed_properties * self.num_other_agents_observed
+
+        # Number of observed properties
+        # - Self observation has 7 slots: 4 (distance to walls) + 1 heading + 2 speed
+        self.self_observed_properties = 7
+        # - Each "other agent" observed has (relative pos) + relative heading + optional speed + type
+        self.num_observed_properties = 4 if not self.use_speed_observation else 6
+
+        # For nearest food, we'll add 3 more dimensions if there's any food patch:
+        #   either (dx, dy, type) or (dist, angle, type)
+        self.food_observation_size = 3 if self.num_food_patch > 0 else 0
+
+        self.observation_size = (
+            self.self_observed_properties
+            + self.num_observed_properties * self.num_other_agents_observed
+            + self.food_observation_size
+        )
 
         self.observation_space = spaces.Dict({
-            agent.agent_id: spaces.Box(
+            agent.entity_id: spaces.Box(
                 low=-np.inf,
                 high=np.inf,
                 dtype=self.float_dtype,
@@ -195,67 +247,56 @@ class Particle2dEnvironment(MultiAgentEnv):
     def max_num_agents(self):
         return self.max_num_preys + self.max_num_predators
 
-    def compute_distance(self, agent1, agent2):
+    def compute_distance(self, agent, other_entity):
+        # agent is a ParticuleAgent; other_entity could be another agent or food.
         if self.periodical_boundary:
             # Calculate the distance considering wrapping at the boundaries
-            delta_x = abs(agent1.loc_x - agent2.loc_x)
-            delta_y = abs(agent1.loc_y - agent2.loc_y)
+            delta_x = abs(agent.loc_x - other_entity.loc_x)
+            delta_y = abs(agent.loc_y - other_entity.loc_y)
 
-            # Consider wrapping effect: if distance is greater than half the stage,
-            # it's shorter to go the other way around
             delta_x = min(delta_x, self.stage_size - delta_x)
             delta_y = min(delta_y, self.stage_size - delta_y)
         else:
-            # Standard Euclidean distance
-            delta_x = agent1.loc_x - agent2.loc_x
-            delta_y = agent1.loc_y - agent2.loc_y
+            delta_x = agent.loc_x - other_entity.loc_x
+            delta_y = agent.loc_y - other_entity.loc_y
 
         return np.sqrt(delta_x ** 2 + delta_y ** 2, dtype=self.float_dtype)
 
-    def compute_angle(self, agent1, agent2):
+    def compute_angle(self, agent, other_entity):
+        # agent is a ParticuleAgent; other_entity could be another agent or food.
         if self.periodical_boundary:
-            # Compute the shortest path deltas considering wrapping at the boundaries
-            delta_x = agent2.loc_x - agent1.loc_x
-            delta_y = agent2.loc_y - agent1.loc_y
-
-            # Adjust deltas for periodic boundary conditions
+            delta_x = other_entity.loc_x - agent.loc_x
+            delta_y = other_entity.loc_y - agent.loc_y
             if abs(delta_x) > self.stage_size / 2:
-                if delta_x > 0:
-                    delta_x -= self.stage_size
-                else:
-                    delta_x += self.stage_size
-
+                delta_x -= self.stage_size * sign(delta_x)
             if abs(delta_y) > self.stage_size / 2:
-                if delta_y > 0:
-                    delta_y -= self.stage_size
-                else:
-                    delta_y += self.stage_size
+                delta_y -= self.stage_size * sign(delta_y)
         else:
-            # Compute the direct deltas without considering periodic boundaries
-            delta_x = agent2.loc_x - agent1.loc_x
-            delta_y = agent2.loc_y - agent1.loc_y
+            delta_x = other_entity.loc_x - agent.loc_x
+            delta_y = other_entity.loc_y - agent.loc_y
 
-        # Compute the direction to the other agent
-        direction = np.arctan2(delta_y, delta_x).astype(self.float_dtype) - agent1.heading
-
-        # Normalize the direction to the range [-pi, pi]
+        direction = np.arctan2(delta_y, delta_x).astype(self.float_dtype) - agent.heading
+        # Normalize to [-pi, pi]
         direction = (direction + self.float_dtype(np.pi)) % (2 * self.float_dtype(np.pi)) - self.float_dtype(np.pi)
         return direction
 
-    def _observation_pos(self, agent, other_agent):
+    def _observation_pos(self, agent, other_entity):
+        """
+        Return either Cartesian or polar coordinates from agent to `other_entity`.
+        """
         if not self.use_polar_coordinate:
-            return (other_agent.loc_x - agent.loc_x), (
-                    other_agent.loc_y - agent.loc_y)
+            return (other_entity.loc_x - agent.loc_x), (
+                    other_entity.loc_y - agent.loc_y)
         else:
-            dist = self.compute_distance(agent, other_agent)
-            direction = self.compute_angle(agent, other_agent)
+            dist = self.compute_distance(agent, other_entity)
+            direction = self.compute_angle(agent, other_entity)
             return dist, direction
 
     def _generate_observation(self, agent):
         # initialize obs as an empty list of correct size
         obs = np.zeros(self.observation_size, dtype=self.float_dtype)
 
-        # SELF OBSERVATION
+        # 1) SELF OBSERVATION (7 slots)
         # Distance to walls
         obs[0] = agent.loc_x
         obs[1] = agent.loc_y
@@ -271,7 +312,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             obs[5] = np.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2, dtype=self.float_dtype)
             obs[6] = np.arctan2(agent.speed_y, agent.speed_x).astype(self.float_dtype) % (2 * self.float_dtype(np.pi))
 
-        # OTHER AGENTS
+        # 2) OTHER AGENTS OBSERVATION
         # Remove the agent itself and the agents that are not in the game
         other_agents = [
             other_agent for other_agent in self.particule_agents
@@ -279,14 +320,14 @@ class Particle2dEnvironment(MultiAgentEnv):
                and abs(self.compute_angle(agent, other_agent)) < self.max_seeing_angle
                and self.compute_distance(agent, other_agent) < self.max_seeing_distance
         ]
-
+        # Sort by distance
         other_agents = sorted(other_agents, key=lambda other_agent: self.compute_distance(agent, other_agent))
         # keep only the closest agents
         other_agents = other_agents[:self.num_other_agents_observed]
 
         for j, other in enumerate(other_agents):
             # count the number of already observed properties
-            base_index = 5 + j * self.num_observed_properties
+            base_index = self.self_observed_properties + j * self.num_observed_properties
             obs[base_index], obs[base_index + 1] = self._observation_pos(agent, other)  # relative position
             obs[base_index + 2] = ((other.heading - agent.heading) % (2 * self.float_dtype(np.pi)) - self.float_dtype(np.pi))  # relative heading
             if self.use_speed_observation:
@@ -304,12 +345,25 @@ class Particle2dEnvironment(MultiAgentEnv):
                                                      other.speed_x - agent.speed_x
                                                      ).astype(self.float_dtype) - agent.heading
 
-            obs[base_index + (self.num_observed_properties - 1)] = other.agent_type
+            obs[base_index + (self.num_observed_properties - 1)] = other.entity_type
+
+        # 3) NEAREST FOOD (if any) -> last 3 slots
+        if self.num_food_patch > 0:
+            active_foods = [f for f in self.foods if f.active]
+            if len(active_foods) > 0:
+                nearest_food = min(active_foods, key=lambda f: self.compute_distance(agent, f))
+                fx_or_dist, fy_or_angle = self._observation_pos(agent, nearest_food)
+                obs[base_index] = fx_or_dist
+                obs[base_index + 1] = fy_or_angle
+                obs[base_index + 2] = nearest_food.entity_type  # e.g. 2 for food
+            else:
+                # No active food: just fill with 0
+                pass
 
         return obs
 
     def _get_observation_dict(self):
-        return {agent.agent_id: self._generate_observation(agent) for agent in self.particule_agents if agent.still_in_game == 1}
+        return {agent.entity_id: self._generate_observation(agent) for agent in self.particule_agents if agent.still_in_game == 1}
 
     def reset(self, seed=None, options=None):
         # Reset time to the beginning
@@ -331,8 +385,67 @@ class Particle2dEnvironment(MultiAgentEnv):
                 self.particule_agents[i].heading = headings[i]
                 self.particule_agents[i].still_in_game = 1
 
+
+        # Initialize food patches and food
+        # """
+        # For each patch, add a random number of foods [0..max_number_of_food] inside the patch.
+        # """
+        for patch in self.food_patches:
+            # random how many initial
+            initial_count = self.np_random.randint(0, self.max_number_of_food + 1)
+            for _ in range(initial_count):
+                r = self.np_random.uniform(0, self.food_patch_radius)
+                theta = self.np_random.uniform(0, 2 * np.pi)
+                fx = patch["cx"] + r * np.cos(theta)
+                fy = patch["cy"] + r * np.sin(theta)
+                new_food = Food(
+                    id=patch["patch_id"],
+                    radius=self.food_radius,
+                    loc_x=fx,
+                    loc_y=fy,
+                    active=True
+                )
+                self.foods.append(new_food)
+
+            # initial spawn
+            self._spawn_food_from_patches(force_spawn=True)
+
         observation_list = self._get_observation_dict()
         return observation_list, {}
+
+    def _spawn_food_from_patches(self, force_spawn=False):
+        """
+        For each patch, if the patch is allowed to spawn (timestep >= next_spawn_time)
+        and there is no active food inside it, spawn a new piece of food in that patch area.
+        If `force_spawn=True`, ignore the next_spawn_time requirement (used at reset).
+        """
+        if self.num_food_patch == 0:
+            return
+
+        for patch in self.food_patches:
+            # check the time
+            if force_spawn or (self.timestep >= patch["next_spawn_time"]):
+                # check if there's already active food in that patch
+                patch_food = [f for f in self.foods if f.active and f.entity_id == patch["patch_id"]]
+                if len(patch_food) == 0:
+                    # spawn new food inside patch radius
+                    r = self.np_random.uniform(0, self.food_patch_radius)
+                    theta = self.np_random.uniform(0, 2 * np.pi)
+                    fx = patch["cx"] + r * np.cos(theta)
+                    fy = patch["cy"] + r * np.sin(theta)
+
+                    # create food
+                    new_food = Food(
+                        entity_id=patch["patch_id"],  # or any ID scheme
+                        radius=self.food_radius,
+                        food_type=2,
+                        loc_x=fx,
+                        loc_y=fy,
+                        active=True
+                    )
+                    self.foods.append(new_food)
+                # schedule next spawn
+                patch["next_spawn_time"] = self.timestep + (self.food_patch_regen_time or 9999999)
 
     def step(self, action_list):
 
@@ -346,6 +459,9 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # append the eating events to the list
             all_eating_events.extend(eating_events)
 
+        # Possibly spawn more food if the time interval has elapsed
+        self._spawn_food_from_patches(force_spawn=False)
+
         reward_dict = self._get_reward(action_list, all_eating_events)
         observation_dict = self._get_observation_dict()
         terminated, truncated = self._get_done()
@@ -356,15 +472,21 @@ class Particle2dEnvironment(MultiAgentEnv):
         return observation_dict, reward_dict, terminated, truncated, infos
 
     def _simulate_one_step(self, dt, action_dict=None):
-
-        # BUMP INTO OTHER AGENTS
+        """
+        A single sub-step of physics, including collisions among agents,
+        collisions with food, bouncing from walls, etc.
+        """
         eating_events = []
-        contact_force_dict = {agent.agent_id: np.array([0.0, 0.0]) for agent in self.particule_agents}
+
+        #######################################################################
+        # 1) Agent-Agent collisions (predator eats prey).
+        #######################################################################        eating_events = []
+        contact_force_dict = {agent.entity_id: np.array([0.0, 0.0]) for agent in self.particule_agents}
         for agent_a in self.particule_agents:
             for agent_b in self.particule_agents:
                 if agent_a.still_in_game == 0 or agent_b.still_in_game == 0:
                     continue
-                if agent_a.agent_id < agent_b.agent_id:  # Avoid double-checking and self-checking
+                if agent_a.entity_id < agent_b.entity_id:  # Avoid double-checking and self-checking
                     continue
 
                 delta_x = agent_a.loc_x - agent_b.loc_x
@@ -373,10 +495,10 @@ class Particle2dEnvironment(MultiAgentEnv):
                 dist_min = agent_a.radius + agent_b.radius
 
                 if dist < dist_min:  # There's a collision
-                    if agent_a.agent_type != agent_b.agent_type:
-                        prey_agent, predator_agent = (agent_a, agent_b) if agent_a.agent_type == 0 else (
+                    if agent_a.entity_type != agent_b.entity_type:
+                        prey_agent, predator_agent = (agent_a, agent_b) if agent_a.entity_type == 0 else (
                             agent_b, agent_a)
-                        eating_events.append({"predator_id": predator_agent.agent_id, "prey_id": prey_agent.agent_id})
+                        eating_events.append({"predator_id": predator_agent.entity_id, "prey_id": prey_agent.entity_id})
 
                         # No bouncing if the prey is already consumed therefore we skip the contact force
                         if self.prey_consumed:
@@ -393,9 +515,35 @@ class Particle2dEnvironment(MultiAgentEnv):
                         force_direction = np.array([delta_x, delta_y]) / dist
 
                     force = force_magnitude * force_direction
-                    contact_force_dict[agent_a.agent_id] += force
-                    contact_force_dict[agent_b.agent_id] -= force  # Apply equal and opposite force
+                    contact_force_dict[agent_a.entity_id] += force
+                    contact_force_dict[agent_b.entity_id] -= force  # Apply equal and opposite force
 
+        #######################################################################
+        # 2) Agent-Food collisions
+        #######################################################################
+        food_eating_events = []
+        for food_item in self.foods:
+            if not food_item.active:
+                continue
+            for agent in self.particule_agents:
+                if agent.still_in_game == 0:
+                    continue
+                dist = self.compute_distance(agent, food_item)
+                if dist < (agent.radius + food_item.radius):
+                    # Agent picks up/eats this food
+                    food_eating_events.append(
+                        {"food_id": food_item.entity_id, "agent_id": agent.entity_id}
+                    )
+                    food_item.active = False
+                    # Once eaten by one agent, break so it's not double-eaten
+                    break
+
+        if len(food_eating_events) > 0:
+            eating_events.extend(food_eating_events)
+
+        #######################################################################
+        # 3) Update each agent's speed and position (simple physics)
+        #######################################################################
         for agent in self.particule_agents:
             if agent.still_in_game == 1:
                 # DRAGGING FORCE
@@ -418,14 +566,14 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # ACCELERATION FORCE
                 if action_dict is not None:
                     # get the actions for this agent
-                    self_force_amplitude, self_force_orientation = action_dict.get(agent.agent_id)
+                    self_force_amplitude, self_force_orientation = action_dict.get(agent.entity_id)
                     agent.heading = (agent.heading + self_force_orientation * self.max_turn) % (2 * self.float_dtype(np.pi))
-                    self_force_amplitude *= self.max_acceleration_prey if agent.agent_type == 0 else self.max_acceleration_predator
+                    self_force_amplitude *= self.max_acceleration_prey if agent.entity_type == 0 else self.max_acceleration_predator
                     acceleration_x += self_force_amplitude * np.cos(agent.heading)
                     acceleration_y += self_force_amplitude * np.sin(agent.heading)
 
                 # CONTACT FORCE
-                contact_force = contact_force_dict.get(agent.agent_id)
+                contact_force = contact_force_dict.get(agent.entity_id)
                 acceleration_x += contact_force[0]
                 acceleration_y += contact_force[1]
 
@@ -457,7 +605,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 agent.speed_y += acceleration_y * dt
 
                 # Apply the speed limit
-                max_speed = self.max_speed_prey if agent.agent_type == 0 else self.max_speed_predator
+                max_speed = self.max_speed_prey if agent.entity_type == 0 else self.max_speed_predator
                 current_speed = np.sqrt(agent.speed_x ** 2 + agent.speed_y ** 2, dtype=self.float_dtype)
                 if max_speed is not None and current_speed > max_speed:
                     agent.speed_x *= max_speed / current_speed
@@ -495,44 +643,56 @@ class Particle2dEnvironment(MultiAgentEnv):
 
     def _get_reward(self, action_list, all_eating_events):
         # Initialize rewards
-        reward_dict = {agent.agent_id: 0 for agent in self.particule_agents if agent.still_in_game == 1}
+        reward_dict = {agent.entity_id: 0 for agent in self.particule_agents if agent.still_in_game == 1}
 
+        # 1) Agent-vs-agent eating events (predation)
         for event in all_eating_events:
-            predator_id, prey_id = event["predator_id"], event["prey_id"]
-            # Apply the eating reward for the predator and the death penalty for the prey
-            reward_dict[predator_id] += self.eating_reward_for_predator
-            reward_dict[prey_id] += self.death_penalty_for_prey
-            # find the prey in particule_agents and set still_in_game to 0
-            if self.prey_consumed:
-                self.num_preys -= 1
+            if "predator_id" in event and "prey_id" in event:
+                predator_id, prey_id = event["predator_id"], event["prey_id"]
+                # Apply the eating reward for the predator and the death penalty for the prey
+                reward_dict[predator_id] += self.eating_reward_for_predator
+                reward_dict[prey_id] += self.death_penalty_for_prey
+                # find the prey in particule_agents and set still_in_game to 0
+                if self.prey_consumed:
+                    self.num_preys -= 1
+                    for agent in self.particule_agents:
+                        if agent.entity_id == prey_id:
+                            agent.still_in_game = 0
+
+                # collective penalty for preys
                 for agent in self.particule_agents:
-                    if agent.agent_id == prey_id:
-                        agent.still_in_game = 0
+                    if agent.entity_type == 0 and agent.still_in_game == 1:  # Prey
+                        reward_dict[agent.entity_id] += self.collective_death_penalty_for_prey
+                    elif agent.entity_type == 1:  # Predator
+                        reward_dict[agent.entity_id] += self.collective_eating_reward_for_predator
 
-            # collective penalty for preys
-            for agent in self.particule_agents:
-                if agent.agent_type == 0 and agent.still_in_game == 1:  # Prey
-                    reward_dict[agent.agent_id] += self.collective_death_penalty_for_prey
-                elif agent.agent_type == 1:  # Predator
-                    reward_dict[agent.agent_id] += self.collective_eating_reward_for_predator
+        # 2) Agent-vs-food events
+        for event in all_eating_events:
+            if "food_id" in event and "agent_id" in event:
+                agent_id = event["agent_id"]
+                if agent_id in reward_dict:
+                    reward_dict[agent_id] += self.food_reward
+                # The food is marked inactive in _simulate_one_step,
+                # so no further changes needed here.
 
+        # 3) Survival / starve penalty / energy cost / edge hits
         for agent in self.particule_agents:
             if agent.still_in_game:
-                if agent.agent_type == 0:  # 0 for prey, is_prey
-                    reward_dict[agent.agent_id] += self.surviving_reward_for_prey
+                if agent.entity_type == 0:  # 0 for prey, is_prey
+                    reward_dict[agent.entity_id] += self.surviving_reward_for_prey
                 else:  # is_predator
-                    reward_dict[agent.agent_id] += self.starving_penalty_for_predator
+                    reward_dict[agent.entity_id] += self.starving_penalty_for_predator
 
                 # ENERGY EFFICIENCY
                 # Add the energy efficiency penalty
                 # set the energy cost penalty
                 if action_list is not None:
-                    self_force_amplitude, self_force_orientation = action_list.get(agent.agent_id)
+                    self_force_amplitude, self_force_orientation = action_list.get(agent.entity_id)
 
                     energy_cost_penalty = -(
                             abs(self_force_amplitude) + abs(self_force_orientation)
                     ) * self.energy_cost_penalty_coef
-                    reward_dict[agent.agent_id] += energy_cost_penalty
+                    reward_dict[agent.entity_id] += energy_cost_penalty
 
                 # WALL avoidance
                 # Check if the agent is touching the edge
@@ -547,7 +707,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                     )
 
                     if is_touching_edge_x or is_touching_edge_y:
-                        reward_dict[agent.agent_id] += self.edge_hit_penalty
+                        reward_dict[agent.entity_id] += self.edge_hit_penalty
 
         return reward_dict
 
@@ -556,11 +716,11 @@ class Particle2dEnvironment(MultiAgentEnv):
         # is True where the prey is eaten (agent.still_in_game == 0)
         # or when episode ends because all preys have been eaten (self.num_preys == 0)
         terminated = {
-            agent.agent_id: self.num_preys == 0 or self.timestep >= self.episode_length or agent.still_in_game == 0 for
+            agent.entity_id: self.num_preys == 0 or self.timestep >= self.episode_length or agent.still_in_game == 0 for
             agent in self.particule_agents}
         terminated['__all__'] = self.num_preys == 0 or self.timestep >= self.episode_length
         # Premature ending (because of time limit)
-        truncated = {agent.agent_id: self.timestep >= self.episode_length for agent in self.particule_agents}
+        truncated = {agent.entity_id: self.timestep >= self.episode_length for agent in self.particule_agents}
         truncated['__all__'] = self.timestep >= self.episode_length
 
         return terminated, truncated
@@ -571,6 +731,7 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         predator_color = (195, 67, 200)
         prey_color = (44, 60, 182)
+        food_color = (60, 180, 75)
 
         fig_size = 512
         pix_square_size = fig_size / self.stage_size
@@ -578,6 +739,7 @@ class Particle2dEnvironment(MultiAgentEnv):
         # Create a blank white canvas
         canvas = np.ones((fig_size, fig_size, 3), dtype=np.uint8) * 255
 
+        # Draw agents
         for agent in self.particule_agents:
             if agent.still_in_game == 1:
                 center = (
@@ -585,14 +747,21 @@ class Particle2dEnvironment(MultiAgentEnv):
                     int(agent.loc_y * pix_square_size),
                 )
                 radius = int(agent.radius * pix_square_size)
-                color = prey_color if agent.agent_type == 0 else predator_color
+                color = prey_color if agent.entity_type == 0 else predator_color
 
                 # thickness = -1 means filled circle
                 cv2.circle(canvas, center, radius, color, thickness=-1)
 
-        # `canvas` is already shape (height, width, 3).
-        # If you need (width, height, 3), you could transpose, but usually
-        # (height, width, 3) is standard in image processing and in many loggers.
+        # Draw food
+        for f in self.foods:
+            if f.active:
+                center = (
+                    int(f.loc_x * pix_square_size),
+                    int(f.loc_y * pix_square_size),
+                )
+                radius = int(f.radius * pix_square_size)
+                cv2.circle(canvas, center, radius, food_color, thickness=-1)
+
         return canvas
 
 class MyCallbacks(DefaultCallbacks):
@@ -612,9 +781,9 @@ class MyCallbacks(DefaultCallbacks):
             episode.add_temporary_timestep_data("render_images", frame)
 
         ## Metrics
-        loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-        loc_y = [agent.loc_y for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
-        heading = [agent.heading for agent in env.particule_agents if agent.still_in_game == 1 and agent.agent_type == 0]
+        loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
+        loc_y = [agent.loc_y for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
+        heading = [agent.heading for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
 
         if env.num_preys > 0:
             dos = calculate_dos(loc_x, loc_y) / (env.num_preys * env.grid_diagonal)
