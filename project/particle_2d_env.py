@@ -526,7 +526,7 @@ class Particle2dEnvironment(MultiAgentEnv):
             if not food_item.active:
                 continue
             for agent in self.particule_agents:
-                if agent.still_in_game == 0 and agent.entity_type == 1: # Only preys can eat
+                if agent.still_in_game == 0 or agent.entity_type == 1: # Only preys can eat
                     continue
                 dist = self.compute_distance(agent, food_item)
                 if dist < (agent.radius + food_item.radius):
