@@ -7,7 +7,6 @@ import numpy as np
 from matplotlib import animation
 from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d import art3d
-import concurrent.futures
 
 def generate_animation_3d(
         episode_states,

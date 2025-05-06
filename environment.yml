@@ -6,17 +6,17 @@ dependencies:
   - python=3.11
   - ffmpeg
   - jupyterlab
+  - ipykernel
   - matplotlib
   - graph-tool
+  - tqdm
+  - numpy
+  - scipy
   - pip
   - pip:
     - ray[rllib]
     - gymnasium
-    - numpy
-    - tqdm
     - torch
-    - tensorflow
-    - pygame
     - "wandb[media]"
     - ipywidgets
     - jupyterlab-execute-time

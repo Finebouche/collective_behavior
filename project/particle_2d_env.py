@@ -7,6 +7,7 @@ from ray.rllib.env.env_context import EnvContext
 
 from metrics import calculate_dos, calculate_doa
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.callbacks.callbacks import RLlibCallback
 
 import wandb
 import cv2
@@ -76,7 +77,7 @@ class Food(BaseEntity):
 class Particle2dEnvironment(MultiAgentEnv):
     def __init__(self, config: EnvContext):
         super().__init__()
-        self.float_dtype = np.float64
+        self.float_dtype = np.float32
         self.int_dtype = np.int32
         self.eps = self.float_dtype(1e-10)
 
@@ -180,8 +181,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.action_space = spaces.Dict({
             agent.entity_id: spaces.Box(
-                low=np.array([0, -1]),  # this gets multiplied later
-                high=np.array([1, 1]),  # this gets multiplied later
+                low=np.array([0, -1], dtype=self.float_dtype),  # this gets multiplied later
+                high=np.array([1, 1], dtype=self.float_dtype),  # this gets multiplied later
                 dtype=self.float_dtype,
                 shape=(2,)
             ) for agent in self.particule_agents
@@ -221,8 +222,8 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.observation_space = spaces.Dict({
             agent.entity_id: spaces.Box(
-                low=-np.inf,
-                high=np.inf,
+                low=np.full(self.observation_size, -np.inf, dtype=self.float_dtype),
+                high=np.full(self.observation_size,  np.inf, dtype=self.float_dtype),
                 dtype=self.float_dtype,
                 shape=(self.observation_size,)
             ) for agent in self.particule_agents
@@ -363,7 +364,7 @@ class Particle2dEnvironment(MultiAgentEnv):
                 # No active food: just fill with 0
                 pass
 
-        return obs
+        return obs.astype(self.float_dtype, copy=False)
 
     def _get_observation_dict(self):
         return {agent.entity_id: self._generate_observation(agent) for agent in self.particule_agents if agent.still_in_game == 1}
@@ -771,7 +772,41 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         return canvas
 
-class MyCallbacks(DefaultCallbacks):
+class MetricsCallbacks(RLlibCallback):
+    # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.best_episode_and_return = (None, float("-inf"))
+        self.sample_step = 0
+
+    def on_episode_step(self, *, episode, env, **kwargs):
+        ## Metrics
+        loc_x = [agent.loc_x for agent in env.envs[0].unwrapped.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
+        loc_y = [agent.loc_y for agent in env.envs[0].unwrapped.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
+        heading = [agent.heading for agent in env.envs[0].unwrapped.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
+
+        if env.envs[0].unwrapped.num_preys > 0:
+            dos = calculate_dos(loc_x, loc_y) / (env.envs[0].unwrapped.num_preys * env.envs[0].unwrapped.grid_diagonal)
+            doa = calculate_doa(heading) / (env.envs[0].unwrapped.num_preys * 2 * env.envs[0].unwrapped.float_dtype(np.pi))
+
+            episode.add_temporary_timestep_data("dos", dos)
+            episode.add_temporary_timestep_data("doa", doa)
+            episode.add_temporary_timestep_data("time_step", 1)
+
+    def on_episode_end(self, *, episode, metrics_logger, **kwargs):
+
+        ## Metrics
+        # Average DoS at the end of episode
+        average_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
+        average_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
+
+        metrics_logger.log_value("mean_dos", average_dos, reduce="mean")
+        metrics_logger.log_value("max_dos", average_dos, reduce="max")
+        metrics_logger.log_value("mean_doa", average_doa, reduce="mean")
+        metrics_logger.log_value("max_doa", average_doa, reduce="max")
+
+
+class RenderingCallback (RLlibCallback):
     # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -781,24 +816,9 @@ class MyCallbacks(DefaultCallbacks):
     def on_episode_step(self, *, episode, env, **kwargs):
         # Rendering
         if self.sample_step % 10 == 0:
-            if isinstance(env.unwrapped, vector.VectorEnv):
-                frame = env.envs[0].render()
-            else:
-                frame = env.render()
+            frame = env.envs[0].unwrapped.render()
+
             episode.add_temporary_timestep_data("render_images", frame)
-
-        ## Metrics
-        loc_x = [agent.loc_x for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
-        loc_y = [agent.loc_y for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
-        heading = [agent.heading for agent in env.particule_agents if agent.still_in_game == 1 and agent.entity_type == 0]
-
-        if env.num_preys > 0:
-            dos = calculate_dos(loc_x, loc_y) / (env.num_preys * env.grid_diagonal)
-            doa = calculate_doa(heading) / (env.num_preys * 2 * env.float_dtype(np.pi))
-
-            episode.add_temporary_timestep_data("dos", dos)
-            episode.add_temporary_timestep_data("doa", doa)
-            episode.add_temporary_timestep_data("time_step", 1)
 
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
         # Rendering
@@ -814,16 +834,6 @@ class MyCallbacks(DefaultCallbacks):
             if episode_return > self.best_episode_and_return[1]:
                 # maybe video = video = np.expand_dims(video, axis=0) is better
                 self.best_episode_and_return = (wandb.Video(video, fps=30, format="gif") , episode_return)
-
-        ## Metrics
-        # Average DoS at the end of episode
-        average_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
-        average_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
-
-        metrics_logger.log_value("mean_dos", average_dos, reduce="mean")
-        metrics_logger.log_value("max_dos", average_dos, reduce="max")
-        metrics_logger.log_value("mean_doa", average_doa, reduce="mean")
-        metrics_logger.log_value("max_doa", average_doa, reduce="max")
 
     def on_sample_end(self, *, metrics_logger, **kwargs) -> None:
         """Logs the best video to this EnvRunner's MetricsLogger."""

@@ -135,7 +135,7 @@ def calculate_milling_parameters(df, threshold, min_group_size):
         df = df[df["group"].isin(valid_groups)]
 
         return df
-
+    return None
 
 
 def calculate_group_properties(df, threshold, min_group_size):
@@ -231,4 +231,4 @@ def calculate_group_properties(df, threshold, min_group_size):
         # Append group properties to master dataframe
         group_properties = pd.concat([group_properties, group_properties_t], ignore_index=True)
 
-    return group, group_properties
+    return group_properties
