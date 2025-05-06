@@ -7,7 +7,7 @@ env_config = dict(
     # General
     num_preys=30,
     num_predators=4,
-    stage_size=30,
+    stage_size=10,
     episode_length=700,
     # Physics
     inertia=True,
@@ -15,9 +15,9 @@ env_config = dict(
     contact_force_coefficient=5,
     contact_margin=0.2,
     friction_regime="quadratic",            # linear=1, quadratic=2 or intermediate=1.4
-    periodical_boundary=False,           # If False, the wall is solid
-    wall_contact_force_coefficient=5,    # Only used when periodical_boundary=False, else ignored
-    prey_consumed=False,                 # If True, prey are removed when eaten
+    periodical_boundary=False,              # If False, the wall is solid
+    wall_contact_force_coefficient=5,       # Only used when periodical_boundary=False, else ignored
+    prey_consumed=False,                    # If True, prey are removed when eaten
     # Agents
     prey_radius=0.1,
     predator_radius=0.4,

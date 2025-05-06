@@ -135,9 +135,6 @@ class Particle2dEnvironment(MultiAgentEnv):
 
         self.prey_radius = config.get('prey_radius')
         self.predator_radius = config.get('predator_radius')
-        assert 0 <= self.prey_radius <= 1
-        assert 0 <= self.predator_radius <= 1
-
         self.agent_density = config.get('agent_density')
         assert 0 < self.agent_density
 
