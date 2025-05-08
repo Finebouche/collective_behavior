@@ -797,14 +797,17 @@ class MetricsCallbacks(RLlibCallback):
 
         ## Metrics
         # Average DoS at the end of episode
-        average_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
-        average_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
+        avg_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
+        avg_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
 
-        metrics_logger.log_value("mean_dos", average_dos, reduce="mean")
-        metrics_logger.log_value("max_dos", average_dos, reduce="max")
-        metrics_logger.log_value("mean_doa", average_doa, reduce="mean")
-        metrics_logger.log_value("max_doa", average_doa, reduce="max")
+        metrics_logger.log_value("mean_dos", avg_dos, reduce="mean")
+        metrics_logger.log_value("max_dos", avg_dos, reduce="max")
+        metrics_logger.log_value("mean_doa", avg_doa, reduce="mean")
+        metrics_logger.log_value("max_doa", avg_doa, reduce="max")
+        schooling_score = avg_doa * (1.0 - avg_dos)
 
+        # log it so Tune can see it
+        metrics_logger.log_value("schooling_score", schooling_score, reduce="max")
 
 class RenderingCallback (RLlibCallback):
     # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
