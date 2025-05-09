@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - pytorch
 dependencies:
-  - python=3.11
+  - python>=3.11
   - ffmpeg
   - jupyterlab
   - ipykernel
@@ -15,7 +15,6 @@ dependencies:
   - pip
   - pip:
     - ray[rllib]
-    - gymnasium
     - torch
     - "wandb[media]"
     - ipywidgets

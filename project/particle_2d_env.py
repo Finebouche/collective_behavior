@@ -773,11 +773,16 @@ class Particle2dEnvironment(MultiAgentEnv):
         return canvas
 
 class MetricsCallbacks(RLlibCallback):
-    # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/envs/env_rendering_and_recording.py
+    # Based on example from https://github.com/ray-project/ray/blob/master/rllib/examples/metrics/custom_metrics_in_env_runners.py
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.best_episode_and_return = (None, float("-inf"))
         self.sample_step = 0
+
+    def on_episode_start(self, *, episode, **kwargs):
+        episode.custom_data["dos"] = []
+        episode.custom_data["doa"] = []
+        episode.custom_data["nb_steps"] = 0
 
     def on_episode_step(self, *, episode, env, **kwargs):
         ## Metrics
@@ -789,24 +794,22 @@ class MetricsCallbacks(RLlibCallback):
             dos = calculate_dos(loc_x, loc_y) / (env.envs[0].unwrapped.num_preys * env.envs[0].unwrapped.grid_diagonal)
             doa = calculate_doa(heading) / (env.envs[0].unwrapped.num_preys * 2 * env.envs[0].unwrapped.float_dtype(np.pi))
 
-            episode.add_temporary_timestep_data("dos", dos)
-            episode.add_temporary_timestep_data("doa", doa)
-            episode.add_temporary_timestep_data("time_step", 1)
+            episode.custom_data["dos"].append(dos)
+            episode.custom_data["doa"].append(doa)
+            episode.custom_data["nb_steps"]  += 1
 
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
 
-        ## Metrics
+        nb_steps = episode.custom_data["nb_steps"] or 1
         # Average DoS at the end of episode
-        avg_dos = sum(episode.get_temporary_timestep_data("dos")) / sum(episode.get_temporary_timestep_data("time_step"))
-        avg_doa = sum(episode.get_temporary_timestep_data("doa")) / sum(episode.get_temporary_timestep_data("time_step"))
-
-        metrics_logger.log_value("mean_dos", avg_dos, reduce="mean")
-        metrics_logger.log_value("max_dos", avg_dos, reduce="max")
-        metrics_logger.log_value("mean_doa", avg_doa, reduce="mean")
-        metrics_logger.log_value("max_doa", avg_doa, reduce="max")
+        avg_dos = sum(episode.custom_data["dos"]) / nb_steps
+        avg_doa = sum(episode.custom_data["doa"]) / nb_steps
         schooling_score = avg_doa * (1.0 - avg_dos)
 
-        # log it so Tune can see it
+        metrics_logger.log_value("mean_dos", avg_dos, reduce="mean", window=200)
+        metrics_logger.log_value("max_dos",  avg_dos, reduce="max",  window=100)
+        metrics_logger.log_value("mean_doa", avg_doa, reduce="mean", window=200)
+        metrics_logger.log_value("max_doa",  avg_doa, reduce="max",  window=100)
         metrics_logger.log_value("schooling_score", schooling_score, reduce="max")
 
 class RenderingCallback (RLlibCallback):
@@ -819,16 +822,19 @@ class RenderingCallback (RLlibCallback):
     def on_episode_step(self, *, episode, env, **kwargs):
         # Rendering
         if self.sample_step % 10 == 0:
+            if "render_images" not in episode.custom_data:
+                episode.custom_data["render_images"] = []
+
             frame = env.envs[0].unwrapped.render()
 
-            episode.add_temporary_timestep_data("render_images", frame)
+            episode.custom_data["render_images"].append(frame)
 
     def on_episode_end(self, *, episode, metrics_logger, **kwargs):
         # Rendering
         episode_return = episode.get_return()
         if episode_return > self.best_episode_and_return[1] and self.sample_step % 10 == 0:
             # Pull all images from the temp. data of the episode.
-            images = episode.get_temporary_timestep_data("render_images")
+            images = episode.custom_data["render_images"]
             # `images` is now a list of 3D ndarrays
             # For WandB videos, we need to put channels first.
             video = np.transpose(np.array(images), (0, 3, 1, 2))
