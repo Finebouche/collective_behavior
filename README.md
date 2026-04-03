@@ -105,12 +105,11 @@ Install collective_behavior using one of the following methods:
 
 ## 🎗 License
 
-This project is protected under the [MIT License ](https://choosealicense.com/licenses/mit/) License.
+This project is protected under the [MIT License ](https://choosealicense.com/licenses/mit/).
 
 ---
 
 ## 🙌 Acknowledgments
 
-- List any resources, contributors, inspiration, etc. here.
-
+- Thanks to [Kajal Kumari](https://www.ab.mpg.de/person/111200) for her help.
 ---
